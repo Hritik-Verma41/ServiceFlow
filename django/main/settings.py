@@ -87,21 +87,36 @@ TEMPLATES = [
 WSGI_APPLICATION = 'main.wsgi.application'
 
 
-# Database
+# Database configuration
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "mssql").lower()
+print(f"Using database engine: {DATABASE_ENGINE}")
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'mssql',
-        'NAME': 'ServiceFlow',
-        'HOST': 'localhost',
-        'PORT': '1433',
-        'OPTIONS': {
-            'driver': 'ODBC Driver 18 for SQL Server',
-            'extra_params': 'TrustServerCertificate=yes',
+    "default": {
+        "ENGINE": "mssql",
+        "NAME": os.getenv("MSSQL_DATABASE", "ServiceFlow"),
+        "HOST": os.getenv("MSSQL_HOST", "localhost"),
+        "PORT": os.getenv("MSSQL_PORT", "1433"),
+        "OPTIONS": {
+            "driver": "ODBC Driver 18 for SQL Server",
+            "extra_params": "TrustServerCertificate=yes",
         },
-    }
+    },
 }
+
+
+if DATABASE_ENGINE == "postgresql":
+    DATABASES["default"] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("SERVICEFLOW_PG_DATABASE", "serviceflow"),
+        "USER": os.getenv("SERVICEFLOW_PG_USER", "serviceflow_user"),
+        "PASSWORD": os.environ.get("SERVICEFLOW_PG_PASSWORD", ""),
+        "HOST": os.getenv("SERVICEFLOW_PG_HOST", "127.0.0.1"),
+        "PORT": os.getenv("SERVICEFLOW_PG_PORT", "5433"),
+        "CONN_MAX_AGE": 0,
+    }
 
 
 # Password validation
