@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
+
 class UserManager(BaseUserManager): 
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -127,3 +128,68 @@ class TechnicianProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.get_full_name()} ({self.employee_id})"
+
+class CompanyMembership(models.Model):
+    class Role(models.TextChoices):
+        COMPANY_ADMIN = 'COMPANY_ADMIN', 'Company Admin'
+        MANAGER = 'MANAGER', 'Manager'
+        TECHNICIAN = 'TECHNICIAN', 'Technician'
+
+    class Status(models.TextChoices):
+        ACTIVE = 'ACTIVE', 'Active'
+        INVITED = 'INVITED', 'Invitied'
+        SUSPENDED = 'SUSPENDED', 'Suspended'
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='company_memberships',
+    )
+
+    company = models.ForeignKey(
+        'companies.Company',
+        on_delete=models.CASCADE,
+        related_name='memberships',
+    )
+
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'company'],
+                name='unique_user_company_membership'
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['company', 'status'],
+                name='membership_company_status_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.company.name} ({self.role})"
