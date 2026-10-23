@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 
 from decimal import Decimal
 
@@ -22,6 +23,8 @@ from rest_framework.views import APIView
 from main.jobs.models import Invoice, Payment
 from main.jobs.payments import CreatePaymentOrderSerializer, VerifyRazorpayPaymentSerializer
 from main.jobs.services.razorpay_service import RazorpayService
+
+logger = logging.getLogger(__name__)
 
 def ensure_invoice_payment_access(user, invoice):
     # Django superusers can manage payemnts for support purposes.
@@ -81,13 +84,22 @@ class CreatePaymentOrderView(APIView):
                 status=status.HTTP_201_CREATED,
             )
 
-        except Exception as error:
+        
+        except Exception:
+            logger.exception(
+                "Failed to create Razorpay order for invoice %s",
+                invoice.id,
+            )
             return Response(
                 {
-                    "detail": str(error),
+                    "detail": (
+                        "Unable to create payment order. "
+                        "Please try again later."
+                    ),
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
 
 class VerifyRazorpayPaymentView(APIView):
     permission_classes = [IsAuthenticated]

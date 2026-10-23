@@ -6,9 +6,10 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
+from unittest.mock import Mock
 
 from main.accounts.models import User
 from main.companies.models import (
@@ -17,6 +18,7 @@ from main.companies.models import (
     CustomerAddress,
 )
 from main.jobs.models import Invoice, Payment, ServiceJob
+from main.jobs.services.razorpay_service import RazorpayService
 
 
 class RazorpayWebhookTests(TestCase):
@@ -373,6 +375,89 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
             Payment.Status.PENDING,
         )
 
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_razorpay_order_creation_failure_is_handled(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.create_order.side_effect = Exception(
+            "Gateway internal secret details"
+        )
+
+        response = self.api_client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(self.invoice.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.data["detail"],
+            "Unable to create payment order. Please try again later.",
+        )
+        self.assertNotIn(
+            "Gateway internal secret details",
+            str(response.data),
+        )
+        self.assertFalse(
+            Payment.objects.filter(
+                invoice=self.invoice,
+                gateway=Payment.Gateway.RAZORPAY,
+                gateway_order_id="",
+            ).exists()
+        )
+    
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_company_admin_can_create_payment_order(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.client.auth = (
+            "rzp_test_example",
+            "mock_secret",
+        )
+
+        payment = Payment.objects.create(
+            invoice=self.invoice,
+            amount=Decimal("118.00"),
+            method=Payment.Method.ONLINE,
+            status=Payment.Status.PENDING,
+            gateway=Payment.Gateway.RAZORPAY,
+            gateway_order_id="order_created_test",
+        )
+
+        mock_service.create_order.return_value = (
+            {
+                "id": "order_created_test",
+                "amount": 11800,
+                "currency": "INR",
+            },
+            payment,
+        )
+
+        response = self.api_client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(self.invoice.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data["order_id"],
+            "order_created_test",
+        )
+        self.assertEqual(response.data["amount"], 11800)
+        self.assertEqual(response.data["currency"], "INR")
+        self.assertEqual(
+            response.data["key_id"],
+            "rzp_test_example",
+        )
+        self.assertIn("payment_id", response.data)
+
+        mock_service.create_order.assert_called_once_with(
+            self.invoice
+        )
+    
     def test_already_successful_payment_is_independent(self):
         self.payment.status = Payment.Status.SUCCESS
         self.payment.gateway_payment_id = "pay_checkout_test"
@@ -500,3 +585,104 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class RazorpayServiceTests(RazorpayWebhookTests):
+    @patch("main.jobs.services.razorpay_service.razorpay.Client")
+    def test_order_creation_failure_does_not_create_payment_record(
+        self, mock_client_class
+    ):
+        mock_client = mock_client_class.return_value
+        mock_client.order.create.side_effect = Exception(
+            "Simulated Razorpay outage"
+        )
+
+        self.payment.delete()
+
+        service = RazorpayService()
+
+        payment_count_before = Payment.objects.filter(
+            invoice=self.invoice,
+            gateway=Payment.Gateway.RAZORPAY,
+        ).count()
+
+        with self.assertRaisesRegex(
+            Exception, "Simulated Razorpay outage"
+        ):
+            service.create_order(self.invoice)
+
+        payment_count_after = Payment.objects.filter(
+            invoice=self.invoice,
+            gateway=Payment.Gateway.RAZORPAY,
+        ).count()
+
+        self.assertEqual(
+            payment_count_after,
+            payment_count_before,
+        )
+        mock_client.order.create.assert_called_once()
+
+    @patch("main.jobs.services.razorpay_service.razorpay.Client")
+    def test_existing_pending_order_is_reused(
+        self, mock_client_class
+    ):
+        mock_client = mock_client_class.return_value
+        mock_client.order.fetch.return_value = {
+            "id": self.payment.gateway_order_id,
+            "amount": 11800,
+            "currency": "INR",
+        }
+
+        service = RazorpayService()
+
+        order, payment = service.create_order(self.invoice)
+
+        self.assertEqual(
+            order["id"],
+            self.payment.gateway_order_id,
+        )
+        self.assertEqual(payment.id, self.payment.id)
+
+        mock_client.order.fetch.assert_called_once_with(
+            self.payment.gateway_order_id
+        )
+        mock_client.order.create.assert_not_called()
+
+    @patch("main.jobs.services.razorpay_service.razorpay.Client")
+    def test_unfetchable_pending_order_is_replaced(
+        self, mock_client_class
+    ):
+        mock_client = mock_client_class.return_value
+        mock_client.order.fetch.side_effect = Exception(
+            "Order not found"
+        )
+        mock_client.order.create.return_value = {
+            "id": "order_replacement_test",
+            "amount": 11800,
+            "currency": "INR",
+        }
+
+        service = RazorpayService()
+        original_payment = self.payment
+
+        order, payment = service.create_order(self.invoice)
+
+        original_payment.refresh_from_db()
+
+        self.assertEqual(
+            original_payment.status,
+            Payment.Status.FAILED,
+        )
+        self.assertEqual(
+            order["id"],
+            "order_replacement_test",
+        )
+        self.assertEqual(
+            payment.gateway_order_id,
+            "order_replacement_test",
+        )
+        self.assertEqual(
+            payment.status,
+            Payment.Status.PENDING,
+        )
+        mock_client.order.create.assert_called_once()

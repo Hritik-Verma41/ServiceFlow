@@ -3,7 +3,7 @@ from decimal import Decimal
 import razorpay
 from django.conf import settings
 
-from main.jobs.models import Invoice, Payment
+from main.jobs.models import Payment
 
 
 class RazorpayService:
