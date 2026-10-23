@@ -445,3 +445,58 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
         )
 
         self.assertEqual(reponse.status_code, 403)
+
+    def test_unauthenticated_user_cannot_create_payment_order(self):
+        client = APIClient()
+
+        response = client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(self.invoice)},
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_user_from_another_company_cannot_create_payment_order(self):
+        other_company = Company.objects.create(
+            name="Other Order Test Company",
+            phone="9000000002",
+            email="other-order-company@example.com",
+        )
+
+        other_user = User.objects.create_user(
+            email="other-order-admin@example.com",
+            password="OtherOrderTestPassword-123!",
+            role="COMPANY_ADMIN",
+            company=other_company,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+
+        response = client.post(
+            "/api/payments/create-order.",
+            {"invoice_id": str(self.invoice.id)},
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_technician_cannot_create_payment_order(self):
+        technician = User.objects.create_user(
+            email="order-technician@example.com",
+            password="OrderTechnicianPassword-123!",
+            role="TECHNICIAN",
+            company=self.company,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=technician)
+
+        response = client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(self.invoice.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
