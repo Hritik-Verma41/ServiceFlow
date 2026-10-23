@@ -33,11 +33,11 @@ DEBUG = True
 ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
-    "considerations-decent-subsequent-lamb.trycloudflare.com",
+    "deliver-things-digit-rap.trycloudflare.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://considerations-decent-subsequent-lamb.trycloudflare.com",
+    "https://deliver-things-digit-rap.trycloudflare.com",
 ]
 
 # Application definition

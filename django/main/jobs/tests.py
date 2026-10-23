@@ -8,7 +8,9 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase, Client
 from django.utils import timezone
+from rest_framework.test import APIClient
 
+from main.accounts.models import User
 from main.companies.models import (
     Company,
     Customer,
@@ -223,4 +225,175 @@ class RazorpayWebhookTests(TestCase):
         self.assertEqual(
             self.payment.status,
             Payment.Status.PENDING,
+        )
+
+
+class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
+    """
+    Reuse the isolated company, customer, address, invoice,
+    and payment setup from RazorpayWebhookTests
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        self.api_client = APIClient()
+        self.api_client.force_authenticate(
+            user=self.make_company_admin()
+        )
+
+        self.verify_url = "/api/payments/verify/"
+
+        self.verify_payload = {
+            "payment_id": str(self.payment.id),
+            "razorpay_order_id": self.payment.gateway_order_id,
+            "razorpay_payment_id": "pay_checkout_test",
+            "razorpay_signature": "test-signature",
+        }
+
+    def make_company_admin(self):
+        return User.objects.create_user(
+            email="webhook-admin@example.com",
+            password="TestPassword-123!",
+            role="COMPANY_ADMIN",
+            company=self.company,
+        )
+
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_invalid_checkout_signature_is_rejected(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.verify_payment_signature.side_effect = (
+            Exception("Invalid signature")
+        )
+
+        response = self.api_client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Payment verification failed.",
+            response.data["detail"],
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.PENDING,
+        )
+
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_order_id_mismatch_is_rejected(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.client.payment.fetch.return_value = {
+            "order_id": "order_wrong",
+            "amount": 11800,
+            "status": "captured",
+        }
+
+        response = self.api_client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Payment does not match the order.",
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.PENDING,
+        )
+
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_amount_mismatch_is_rejected(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.client.payment.fetch.return_value = {
+            "order_id": self.payment.gateway_order_id,
+            "amount": 99999,
+            "status": "captured",
+        }
+
+        response = self.api_client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Payment amount mismatch.",
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.PENDING,
+        )
+
+    @patch("main.jobs.payment_views.RazorpayService")
+    def test_uncaptured_payment_is_not_marked_successful(
+        self, mock_service_class
+    ):
+        mock_service = mock_service_class.return_value
+        mock_service.client.payment.fetch.return_value = {
+            "order_id": self.payment.gateway_order_id,
+            "amount": 11800,
+            "status": "authorized",
+        }
+
+        response = self.api_client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "Payment has not been captured yet.",
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.PENDING,
+        )
+
+    def test_already_successful_payment_is_independent(self):
+        self.payment.status = Payment.Status.SUCCESS
+        self.payment.gateway_payment_id = "pay_checkout_test"
+        self.payment.paid_at = timezone.now()
+        self.payment.save(
+            update_fields=[
+                "status",
+                "gateway_payment_id",
+                "paid_at",
+                "updated_at",
+            ]
+        )
+
+        response = self.api_client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["detail"],
+            "Payment already verified."
         )
