@@ -397,3 +397,15 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
             response.data["detail"],
             "Payment already verified."
         )
+
+    def test_draft_invoice_cannot_create_payment_order(self):
+        self.invoice.status = Invoice.Status.DRAFT
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        response = self.api_client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(self.invoice.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)

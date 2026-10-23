@@ -9,13 +9,16 @@ class CreatePaymentOrderSerializer(serializers.Serializer):
         try:
             invoice = Invoice.objects.get(id=value)
         except Invoice.DoesNotExist:
-            raise serializers.ValidationError(
-                "Invoice not found."
-            )
+            raise serializers.ValidationError("Invoice not found.")
 
-        if invoice.status == Invoice.Status.CANCELLED:
+        payable_statuses = {
+            Invoice.Status.ISSUED,
+            Invoice.Status.PARTIALLY_PAID,
+        }
+
+        if invoice.status not in payable_statuses:
             raise serializers.ValidationError(
-                "Cannot pay a cancelled invoice."
+                "Only issued or partially paid invoices can be paid."
             )
 
         if invoice.balance_due <= 0:
@@ -23,21 +26,15 @@ class CreatePaymentOrderSerializer(serializers.Serializer):
                 "Invoice has no outstanding balance."
             )
 
-        self.invoice = invoice
+        return invoice
 
-        return value
+    def validate(self, attrs):
+        attrs["invoice"] = attrs.pop("invoice_id")
+        return attrs
+
 
 class VerifyRazorpayPaymentSerializer(serializers.Serializer):
     payment_id = serializers.UUIDField()
-
-    razorpay_order_id = serializers.CharField(
-        max_length=150
-    )
-
-    razorpay_payment_id = serializers.CharField(
-        max_length=150
-    )
-
-    razorpay_signature = serializers.CharField(
-        max_length=255
-    )
+    razorpay_order_id = serializers.CharField(max_length=150)
+    razorpay_payment_id = serializers.CharField(max_length=150)
+    razorpay_signature = serializers.CharField(max_length=255)

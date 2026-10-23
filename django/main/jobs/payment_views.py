@@ -56,7 +56,7 @@ class CreatePaymentOrderView(APIView):
 
         serializer.is_valid(raise_exception=True)
 
-        invoice = serializer.invoice
+        invoice = serializer.validated_data["invoice"]
 
         ensure_invoice_payment_access(
             request.user,
