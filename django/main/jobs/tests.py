@@ -649,40 +649,25 @@ class RazorpayServiceTests(RazorpayWebhookTests):
         mock_client.order.create.assert_not_called()
 
     @patch("main.jobs.services.razorpay_service.razorpay.Client")
-    def test_unfetchable_pending_order_is_replaced(
+    def test_unfetchable_pending_order_remains_pending(
         self, mock_client_class
     ):
         mock_client = mock_client_class.return_value
         mock_client.order.fetch.side_effect = Exception(
-            "Order not found"
+            "Temporary gateway failure"
         )
-        mock_client.order.create.return_value = {
-            "id": "order_replacement_test",
-            "amount": 11800,
-            "currency": "INR",
-        }
 
         service = RazorpayService()
-        original_payment = self.payment
 
-        order, payment = service.create_order(self.invoice)
+        with self.assertRaisesRegex(
+            Exception, "Temporary gateway failure"
+        ):
+            service.create_order(self.invoice)
 
-        original_payment.refresh_from_db()
+        self.payment.refresh_from_db()
 
         self.assertEqual(
-            original_payment.status,
-            Payment.Status.FAILED,
-        )
-        self.assertEqual(
-            order["id"],
-            "order_replacement_test",
-        )
-        self.assertEqual(
-            payment.gateway_order_id,
-            "order_replacement_test",
-        )
-        self.assertEqual(
-            payment.status,
+            self.payment.status,
             Payment.Status.PENDING,
         )
-        mock_client.order.create.assert_called_once()
+        mock_client.order.create.assert_not_called()

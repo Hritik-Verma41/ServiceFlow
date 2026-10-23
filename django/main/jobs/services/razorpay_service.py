@@ -38,18 +38,11 @@ class RazorpayService:
         )
 
         if existing_payment:
-            try:
-                existing_order = self.client.order.fetch(
-                    existing_payment.gateway_order_id
-                )
-
-                return existing_order, existing_payment
-
-            except Exception:
-                existing_payment.status = Payment.Status.FAILED
-                existing_payment.save(
-                    update_fields=["status", "updated_at"]
-                )
+            existing_order = self.client.order.fetch(
+                existing_payment.gateway_order_id
+            )
+            
+            return existing_order, existing_payment
 
         amount_in_paise = int(
             amount * Decimal("100")
