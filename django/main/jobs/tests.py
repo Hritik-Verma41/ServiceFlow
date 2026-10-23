@@ -409,3 +409,39 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_unauthenticated_user_cannot_verify_payment(self):
+        client = APIClient()
+
+        response = client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_user_from_another_company_cannot_verify_payment(self):
+        other_company = Company.objects.create(
+            name="Other Test Company",
+            phone="9000000001",
+            email="other-company@example.com",
+        )
+
+        other_user = User.objects.create_user(
+            email="other-admin@example.com",
+            password="OtherTestPassword-123!",
+            role="COMPANY_ADMIN",
+            company=other_company,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=other_user)
+
+        reponse = client.post(
+            self.verify_url,
+            self.verify_payload,
+            format="json",
+        )
+
+        self.assertEqual(reponse.status_code, 403)
