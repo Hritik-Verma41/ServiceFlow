@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>ServiceFlow | Invoice Payment</title>
+
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: #f3f6fb;
+            color: #172033;
+            font-family: Arial, sans-serif;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 440px;
+            padding: 32px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+        }
+
+        .brand {
+            margin-bottom: 8px;
+            color: #2563eb;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        h1 {
+            margin: 0 0 24px;
+            font-size: 26px;
+        }
+
+        .label {
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .invoice-number {
+            margin: 6px 0 24px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .amount-box {
+            padding: 20px;
+            margin-bottom: 24px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #f8fafc;
+        }
+
+        .amount {
+            margin-top: 8px;
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        #message {
+            margin-top: 18px;
+            font-size: 14px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .error {
+            color: #dc2626;
+        }
+
+        .success {
+            color: #15803d;
+        }
+
+        .notice {
+            margin-top: 20px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+
+<body>
+    {% csrf_token %}
+
+    <main class="card">
+        <div class="brand">SERVICEFLOW</div>
+
+        <h1>Invoice Payment</h1>
+
+        {% if error %}
+
+            <p class="error">{{ error }}</p>
+
+        {% else %}
+
+            <div class="label">Invoice Number</div>
+
+            <div class="invoice-number">
+                {{ invoice.invoice_number }}
+            </div>
+
+            <div class="amount-box">
+                <div class="label">Outstanding Balance</div>
+
+                <div class="amount">
+                    ₹{{ invoice.balance_due|floatformat:2 }}
+                </div>
+            </div>
+
+            <button id="pay-button" type="button">
+                Pay Now
+            </button>
+
+            <div id="message" role="status" aria-live="polite"></div>
+
+            <p class="notice">
+                This is a development checkout using Razorpay Test Mode.
+                No real payment should be made.
+            </p>
+
+        {% endif %}
+    </main>
+
+    {% if not error %}
+    <script>
+        const invoiceId = "{{ invoice.id|escapejs }}";
+
+        const csrfToken = document.querySelector(
+            "[name=csrfmiddlewaretoken]"
+        ).value;
+
+        const payButton = document.getElementById("pay-button");
+        const message = document.getElementById("message");
+
+        function showMessage(text, type = "") {
+            message.textContent = text;
+            message.className = type;
+        }
+
+        payButton.addEventListener("click", async function () {
+            payButton.disabled = true;
+            showMessage("Preparing your payment...");
+
+            try {
+                // Step 1: Ask Django to create or reuse an order.
+                const orderResponse = await fetch(
+                    "/api/payments/create-order/",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": csrfToken
+                        },
+                        body: JSON.stringify({
+                            invoice_id: invoiceId
+                        })
+                    }
+                );
+
+                const orderData = await orderResponse.json();
+
+                if (!orderResponse.ok) {
+                    throw new Error(
+                        orderData.detail ||
+                        JSON.stringify(orderData)
+                    );
+                }
+
+                // Step 2: Open Razorpay Checkout.
+                const options = {
+                    key: orderData.key_id,
+                    amount: orderData.amount,
+                    currency: orderData.currency,
+                    name: "ServiceFlow",
+                    description:
+                        "Payment for invoice {{ invoice.invoice_number|escapejs }}",
+                    order_id: orderData.order_id,
+
+                    handler: async function (response) {
+                        showMessage(
+                            "Payment received. Verifying with ServiceFlow..."
+                        );
+
+                        try {
+                            // Step 3: Verify the checkout response on Django.
+                            const verifyResponse = await fetch(
+                                "/api/payments/verify/",
+                                {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                        "X-CSRFToken": csrfToken
+                                    },
+                                    body: JSON.stringify({
+                                        payment_id: orderData.payment_id,
+                                        razorpay_order_id:
+                                            response.razorpay_order_id,
+                                        razorpay_payment_id:
+                                            response.razorpay_payment_id,
+                                        razorpay_signature:
+                                            response.razorpay_signature
+                                    })
+                                }
+                            );
+
+                            const verifyData =
+                                await verifyResponse.json();
+
+                            if (!verifyResponse.ok) {
+                                throw new Error(
+                                    verifyData.detail ||
+                                    "Payment verification failed."
+                                );
+                            }
+
+                            showMessage(
+                                "Payment verified successfully! " +
+                                "Invoice status: " +
+                                verifyData.invoice_status +
+                                ". Outstanding balance: ₹" +
+                                verifyData.balance_due,
+                                "success"
+                            );
+
+                            payButton.textContent = "Payment Complete";
+                        } catch (error) {
+                            showMessage(
+                                error.message +
+                                " If your payment was deducted, " +
+                                "check its status before retrying.",
+                                "error"
+                            );
+                            payButton.disabled = false;
+                        }
+                    },
+
+                    modal: {
+                        ondismiss: function () {
+                            showMessage(
+                                "Checkout closed. If you did not complete " +
+                                "the payment, you can try again."
+                            );
+                            payButton.disabled = false;
+                        }
+                    },
+
+                    theme: {
+                        color: "#2563eb"
+                    }
+                };
+
+                const checkout = new Razorpay(options);
+
+                checkout.on("payment.failed", function (response) {
+                    const description =
+                        response.error &&
+                        response.error.description
+                            ? response.error.description
+                            : "Please try again.";
+
+                    showMessage(
+                        "Payment failed: " + description,
+                        "error"
+                    );
+
+                    payButton.disabled = false;
+                });
+
+                checkout.open();
+
+                showMessage("");
+            } catch (error) {
+                showMessage(error.message, "error");
+                payButton.disabled = false;
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>
