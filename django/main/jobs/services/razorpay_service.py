@@ -2,8 +2,9 @@ from decimal import Decimal
 
 import razorpay
 from django.conf import settings
+from django.db import transaction
 
-from main.jobs.models import Payment
+from main.jobs.models import Invoice, Payment
 
 
 class RazorpayService:
@@ -17,60 +18,64 @@ class RazorpayService:
         )
 
     def create_order(self, invoice):
-        amount = invoice.balance_due
-
-        if amount <= Decimal("0.00"):
-            raise ValueError(
-                "Invoice has no outstanding balance."
-            )
-
-        existing_payment = (
-            Payment.objects
-            .filter(
-                invoice=invoice,
-                gateway=Payment.Gateway.RAZORPAY,
-                status=Payment.Status.PENDING,
-                gateway_order_id__isnull=False,
-            )
-            .exclude(gateway_order_id="")
-            .order_by("-created_at")
-            .first()
-        )
-
-        if existing_payment:
-            existing_order = self.client.order.fetch(
-                existing_payment.gateway_order_id
+        with transaction.atomic():
+            locked_invoice = (
+                Invoice.objects
+                .select_for_update()
+                .get(pk=invoice.pk)
             )
             
-            return existing_order, existing_payment
+            amount = locked_invoice.balance_due
 
-        amount_in_paise = int(
-            amount * Decimal("100")
-        )
+            if amount <= Decimal("0.00"):
+                raise ValueError(
+                    "Invoice has no outstanding balance."
+                )
 
-        order_data = {
-            "amount": amount_in_paise,
-            "currency": "INR",
-            "receipt": str(invoice.id),
-            "notes": {
-                "invoice_number": invoice.invoice_number,
-            },
-        }
+            existing_payment = (
+                Payment.objects
+                .filter(
+                    invoice=locked_invoice,
+                    gateway=Payment.Gateway.RAZORPAY,
+                    status=Payment.Status.PENDING,
+                    gateway_order_id__isnull=False,
+                )
+                .exclude(gateway_order_id="")
+                .order_by("-created_at")
+                .first()
+            )
 
-        razorpay_order = self.client.order.create(
-            order_data
-        )
+            if existing_payment:
+                existing_order = self.client.order.fetch(
+                    existing_payment.gateway_order_id
+                )
+                return existing_order, existing_payment
 
-        payment = Payment.objects.create(
-            invoice=invoice,
-            amount=amount,
-            method=Payment.Method.ONLINE,
-            status=Payment.Status.PENDING,
-            gateway=Payment.Gateway.RAZORPAY,
-            gateway_order_id=razorpay_order["id"],
-        )
+            amount_in_paise = int(
+                amount * Decimal("100")
+            )
 
-        return razorpay_order, payment
+            order_data = {
+                "amount": amount_in_paise,
+                "currency": "INR",
+                "receipt": str(locked_invoice.id),
+                "notes": {
+                    "invoice_number": locked_invoice.invoice_number,
+                },
+            }
+
+            razorpay_order = self.client.order.create(order_data)
+
+            payment = Payment.objects.create(
+                invoice=locked_invoice,
+                amount=amount,
+                method=Payment.Method.ONLINE,
+                status=Payment.Status.PENDING,
+                gateway=Payment.Gateway.RAZORPAY,
+                gateway_order_id=razorpay_order["id"],
+            )
+
+            return razorpay_order, payment
 
     def verify_payment_signature(
         self,

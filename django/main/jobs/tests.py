@@ -2,11 +2,15 @@
 import hashlib
 import hmac
 import json
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from threading import Barrier
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase, Client, override_settings
+from django.db import close_old_connections, connection
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import Mock
@@ -671,3 +675,104 @@ class RazorpayServiceTests(RazorpayWebhookTests):
             Payment.Status.PENDING,
         )
         mock_client.order.create.assert_not_called()
+
+@skipUnless(
+    connection.vendor == "postgresql",
+    "This concurrency test required PostgreSQL."
+)
+class RazorpayOrderConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.company = Company.objects.create(
+            name="Concurrency Test Company",
+            phone="9000000001",
+            email="concurrency-company@example.com"
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Concurrency Test Customer",
+            email="concurrency-customer@example.com"
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Test Address",
+            address_line_1="123 Test Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+            is_primary=True,
+        )
+
+        self.job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            title="Concurrency Test Job",
+        )
+
+        self.invoice = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            job=self.job,
+            invoice_number="INV-CONCURRENCY-TEST",
+            status=Invoice.Status.ISSUED,
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("18.00"),
+            discount_amount=Decimal("0.00"),
+            total_amount=Decimal("118.00"),
+        )
+
+    @patch("main.jobs.services.razorpay_service.razorpay.Client")
+    def test_concurrent_requests_reuse_one_pending_order(
+        self, mock_client_class
+    ):
+        mock_client = mock_client_class.return_value
+        mock_client.order.create.return_value = {
+            "id": "order_concurrent_test",
+            "amount": 11800,
+            "currency": "INR",
+        }
+        mock_client.order.fetch.return_value = {
+            "id": "order_concurrent_test",
+            "amount": 11800,
+            "currency": "INR",
+        }
+
+        barrier = Barrier(2)
+        invoice_id = self.invoice.pk
+
+        def create_order():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                invoice = Invoice.objects.get(pk=invoice_id)
+                service = RazorpayService()
+                order, payment = service.create_order(invoice)
+                return order["id"], str(payment.pk)
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(create_order),
+                executor.submit(create_order),
+            ]
+            results = [future.result(timeout=30) for future in futures]
+
+        self.assertEqual(
+            results[0][0],
+            results[1][0],
+        )
+        self.assertEqual(
+            Payment.objects.filter(
+                invoice=self.invoice,
+                gateway=Payment.Gateway.RAZORPAY,
+                status=Payment.Status.PENDING,
+            ).count(),
+            1,
+        )
+        mock_client.order.create.assert_called_once()
