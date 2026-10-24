@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .forms import UserChangeForm, UserCreationForm
-from .models import User, TechnicianProfile
+from .models import CompanyMembership, Invitation, TechnicianProfile, User
 
 
 @admin.register(User)
@@ -179,4 +179,64 @@ class TechnicianProfileAdmin(admin.ModelAdmin):
     readonly_fields = (
         'created_at',
         'updated_at',
+    )
+
+
+@admin.register(CompanyMembership)
+class CompanyMembershipAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "company",
+        "role",
+        "status",
+        "created_at",
+    )
+
+    list_filter = (
+        "role",
+        "status",
+        "company",
+    )
+
+    search_fields = (
+        "user__email",
+        "company__name",
+    )
+
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(Invitation)
+class InvitationAdmin(admin.ModelAdmin):
+    list_display = (
+        "email",
+        "company",
+        "role",
+        "status",
+        "expires_at",
+        "invited_by",
+    )
+
+    list_filter = (
+        "role",
+        "status",
+        "company",
+    )
+
+    search_fields = (
+        "email",
+        "company__name",
+        "invited_by__email",
+    )
+
+    readonly_fields = (
+        "id",
+        "token_hash",
+        "created_at",
+        "updated_at",
+        "accepted_at",
     )
