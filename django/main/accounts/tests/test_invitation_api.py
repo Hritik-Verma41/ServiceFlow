@@ -1,5 +1,8 @@
 from datetime import timedelta
+from unittest.mock import patch
 
+from django.core import mail
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -79,24 +82,38 @@ class CompanyInvitationAPITests(APITestCase):
             format="json",
         )
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_URL="http://localhost:3000",
+    )
     def test_admin_can_create_invitation(self):
         response = self.invite(self.admin)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["email"], "new-tech@example.com")
-        self.assertEqual(
-            response.data["status"], Invitation.Status.PENDING
-        )
+        self.assertEqual(response.data["status"], Invitation.Status.PENDING)
+        self.assertNotIn("token", response.data)
 
         invitation = Invitation.objects.get(
             email="new-tech@example.com",
             company=self.company,
         )
+        self.assertEqual(len(mail.outbox), 1)
+
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["new-tech@example.com"])
+        self.assertIn(self.company.name, email.subject)
+        self.assertIn("/accept-invitation?token=", email.body)
+
+        raw_token = email.body.split(
+            "/accept-invitation?token=", 1
+        )[1].split()[0]
+
         self.assertEqual(
             invitation.token_hash,
-            hash_invitation_token(response.data["token"]),
+            hash_invitation_token(raw_token),
         )
-        self.assertNotEqual(invitation.token_hash, response.data["token"])
+        self.assertNotEqual(invitation.token_hash, raw_token)
 
     def test_manager_can_invite_technician(self):
         response = self.invite(self.manager)
@@ -324,3 +341,26 @@ class CompanyInvitationAPITests(APITestCase):
         self.assertFalse(
             User.objects.filter(email="expired-tech@example.com").exists()
         )
+
+    @patch(
+        "main.accounts.views.send_company_invitation_email",
+        side_effect=OSError("SMTP unavailable"),
+    )
+    def test_email_failure_rolls_back_invitation(self, mock_send_email):
+        response = self.invite(self.admin)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        self.assertIn("could not be sent", response.data["detail"])
+
+        self.assertFalse(
+            Invitation.objects.filter(
+                company=self.company,
+                email="new-tech@example.com",
+                status=Invitation.Status.PENDING,
+            ).exists()
+        )
+
+        mock_send_email.assert_called_once()

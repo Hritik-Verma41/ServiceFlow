@@ -1,3 +1,6 @@
+import logging
+from smtplib import SMTPException
+
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
@@ -7,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from main.companies.models import Company
+from .emails import send_company_invitation_email
 from .models import CompanyMembership, Invitation, User
 from .permissions import IsCompanyAdminOrManager
 from .serializers import InvitationAcceptSerializer, InvitationCreateSerializer
@@ -17,6 +21,13 @@ from .services import (
     create_invitation,
     get_valid_invitation,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+class InvitationEmailDeliveryError(Exception):
+    """Raised when an invitation email cannot be delivered."""
 
 
 class CompanyInvitationCreateView(APIView):
@@ -101,6 +112,12 @@ class CompanyInvitationCreateView(APIView):
                     role=role,
                     invited_by=request.user,
                 )
+
+                try:
+                    send_company_invitation_email(invitation, raw_token)
+                except (SMTPException, OSError) as exc:
+                    raise InvitationEmailDeliveryError from exc
+
         except IntegrityError:
             # A concurrent request may have created the same pending invitation.
             duplicate_exists = Invitation.objects.filter(
@@ -120,6 +137,22 @@ class CompanyInvitationCreateView(APIView):
 
             raise
 
+        except InvitationEmailDeliveryError:
+            logger.exception(
+                "Failed to send invitation email for company %s to %s",
+                company.id,
+                email,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "The invitation email could not be sent. "
+                        "Please try again later."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         return Response(
             {
                 "id": str(invitation.id),
@@ -128,7 +161,6 @@ class CompanyInvitationCreateView(APIView):
                 "role": invitation.role,
                 "status": invitation.status,
                 "expires_at": invitation.expires_at,
-                "token": raw_token,
             },
             status=status.HTTP_201_CREATED,
         )
