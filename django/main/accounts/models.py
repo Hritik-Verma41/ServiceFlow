@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class UserManager(BaseUserManager): 
@@ -260,10 +261,18 @@ class Invitation(models.Model):
     )
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                "company",
+                condition=models.Q(status="PENDING"),
+                name="unique_pending_invitation_company_email_ci",
+            ),
+        ]
         indexes = [
             models.Index(
-                fields=['company', 'email', 'status'],
-                name='invitation_company_email_idx',
+                fields=["company", "email", "status"],
+                name="invitation_company_email_idx",
             ),
         ]
 

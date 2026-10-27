@@ -170,3 +170,22 @@ class CompanyInvitationAPITests(APITestCase):
             ).count(),
             1,
         )
+
+    def test_duplicate_pending_invitation_is_case_insensitive(self):
+        first_response = self.invite(
+            self.admin,
+            email="New-Tech@example.com",
+        )
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        second_response = self.invite(
+            self.admin,
+            email="new-tech@EXAMPLE.com",
+        )
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_409_CONFLICT,
+        )

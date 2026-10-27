@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -86,12 +87,32 @@ class CompanyInvitationCreateView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        invitation, raw_token = create_invitation(
-            company=company,
-            email=email,
-            role=role,
-            invited_by=request.user,
-        )
+        try:
+            with transaction.atomic():
+                invitation, raw_token = create_invitation(
+                    company=company,
+                    email=email,
+                    role=role,
+                    invited_by=request.user,
+                )
+        except IntegrityError:
+            # A concurrent request may have created the same pending invitation.
+            duplicate_exists = Invitation.objects.filter(
+                company=company,
+                status=Invitation.Status.PENDING,
+            ).annotate(
+                normalized_email=Lower("email"),
+            ).filter(
+                normalized_email=email.lower(),
+            ).exists()
+
+            if duplicate_exists:
+                return Response(
+                    {"detail": "A pending invitation already exists for this email."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            raise
 
         return Response(
             {
