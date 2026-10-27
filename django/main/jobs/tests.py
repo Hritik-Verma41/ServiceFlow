@@ -233,6 +233,25 @@ class RazorpayWebhookTests(TestCase):
             Payment.Status.PENDING,
         )
 
+    def test_captured_event_does_not_overwrite_refunded_payment(self):
+        self.payment.status = Payment.Status.REFUNDED
+        self.payment.save(update_fields=["status"])
+
+        response = self.post_webhook()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(
+            "Manual reconciliation is required.",
+            response.json()["detail"],
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            Payment.Status.REFUNDED,
+        )
+        self.assertEqual(self.payment.gateway_payment_id, "")
+
 
 class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
     """

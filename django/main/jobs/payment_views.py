@@ -436,6 +436,27 @@ def razorpay_webhook(request):
                 status=409,
             )
 
+        if payment.status in {
+            Payment.Status.REFUNDED,
+            Payment.Status.PARTIALLY_REFUNDED,
+        }:
+            logger.error(
+                "Captured Razorpay event received for refunded payment "
+                "id=%s order_id=%s payment_id=%s",
+                payment.id,
+                order_id,
+                gateway_payment_id,
+            )
+            return JsonResponse(
+                {
+                    "detail": (
+                        "Payment is already refunded. "
+                        "Manual reconciliation is required."
+                    )
+                },
+                status=409,
+            )
+
         payment.status = Payment.Status.SUCCESS
         payment.gateway_payment_id = gateway_payment_id
         payment.paid_at = timezone.now()
