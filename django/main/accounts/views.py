@@ -2,15 +2,21 @@ from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from main.companies.models import Company
-from .models import CompanyMembership, Invitation
+from .models import CompanyMembership, Invitation, User
 from .permissions import IsCompanyAdminOrManager
-from .services import create_invitation
-from .serializers import InvitationCreateSerializer
+from .serializers import InvitationAcceptSerializer, InvitationCreateSerializer
+from .services import (
+    InvitationAcceptanceError,
+    InvalidInvitationError,
+    accept_invitation,
+    create_invitation,
+    get_valid_invitation,
+)
 
 
 class CompanyInvitationCreateView(APIView):
@@ -125,4 +131,80 @@ class CompanyInvitationCreateView(APIView):
                 "token": raw_token,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class InvitationAcceptView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = InvitationAcceptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        token = serializer.validated_data["token"]
+
+        try:
+            invitation = get_valid_invitation(token)
+
+            # Existing accounts must authenticate and match the invite email.
+            existing_user = User.objects.filter(
+                email__iexact=invitation.email
+            ).first()
+
+            if existing_user is not None:
+                if not request.user.is_authenticated:
+                    return Response(
+                        {
+                            "detail": (
+                                "Authenticate with the invited account "
+                                "before accepting the invitation."
+                            )
+                        },
+                        status=status.HTTP_401_UNAUTHORIZED,
+                    )
+                if request.user.pk != existing_user.pk:
+                    return Response(
+                        {"detail": "This invitation belongs to a different account."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if not existing_user.is_active:
+                    return Response(
+                        {
+                            "detail": (
+                                "This account is inactive. Contact an administrator."
+                            )
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            user, membership = accept_invitation(
+                token=token,
+                password=serializer.validated_data.get("password"),
+                first_name=serializer.validated_data.get("first_name", ""),
+                last_name=serializer.validated_data.get("last_name", ""),
+            )
+        except InvalidInvitationError:
+            return Response(
+                {"detail": "Invalid or unavailable invitation."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except InvitationAcceptanceError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {
+                "detail": "Invitation accepted successfully.",
+                "user": {
+                    "id": str(user.id),
+                    "email": user.email,
+                },
+                "membership": {
+                    "company_id": str(membership.company_id),
+                    "role": membership.role,
+                    "status": membership.status,
+                },
+            },
+            status=status.HTTP_200_OK,
         )

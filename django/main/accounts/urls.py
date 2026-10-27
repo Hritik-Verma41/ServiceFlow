@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import CompanyInvitationCreateView
+from .views import CompanyInvitationCreateView, InvitationAcceptView
 
 
 urlpatterns = [
@@ -8,5 +8,10 @@ urlpatterns = [
         "accounts/companies/<uuid:company_id>/invitations/",
         CompanyInvitationCreateView.as_view(),
         name="company-invitation-create",
+    ),
+    path(
+        "accounts/invitations/accept/",
+        InvitationAcceptView.as_view(),
+        name="invitation-accept",
     ),
 ]

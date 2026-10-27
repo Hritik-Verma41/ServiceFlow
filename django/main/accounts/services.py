@@ -64,9 +64,13 @@ def get_valid_invitation(token):
     invitations are rejected without changing their status.
     """
     if not token:
-        raise InvalidInvitationError("Invalid or unavailable invitation.")
+        raise InvalidInvitationError(
+            "Invalid or unavailable invitation."
+        )
 
     token_hash = hash_invitation_token(token)
+    expired = False
+    invitation = None
 
     with transaction.atomic():
         try:
@@ -87,11 +91,15 @@ def get_valid_invitation(token):
         if invitation.expires_at <= timezone.now():
             invitation.status = Invitation.Status.EXPIRED
             invitation.save(update_fields=["status", "updated_at"])
-            raise InvalidInvitationError(
-                "Invalid or unavailable invitation."
-            )
+            expired = True
 
-        return invitation
+    # Raise outside atomic so the EXPIRED status remains committed.
+    if expired:
+        raise InvalidInvitationError(
+            "Invalid or unavailable invitation."
+        )
+
+    return invitation
 
 def accept_invitation(*, token, password, first_name="", last_name=""):
     """

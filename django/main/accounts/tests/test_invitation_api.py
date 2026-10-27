@@ -1,9 +1,12 @@
+from datetime import timedelta
+
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from main.accounts.models import CompanyMembership, Invitation, User
-from main.accounts.services import hash_invitation_token
+from main.accounts.services import create_invitation, hash_invitation_token
 from main.companies.models import Company
 
 
@@ -188,4 +191,136 @@ class CompanyInvitationAPITests(APITestCase):
         self.assertEqual(
             second_response.status_code,
             status.HTTP_409_CONFLICT,
+        )
+
+    def test_new_user_can_accept_invitation(self):
+        invitation, token = create_invitation(
+            company=self.company,
+            email="new-tech@example.com",
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {
+                "token": token,
+                "password": "StrongPassword!2026",
+                "first_name": "New",
+                "last_name": "Technician",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            User.objects.filter(email="new-tech@example.com").exists()
+        )
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.ACCEPTED)
+
+    def test_existing_user_must_authenticate(self):
+        _, token = create_invitation(
+            company=self.company,
+            email=self.technician.email,
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {"token": token},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_different_authenticated_user_cannot_accept_invitation(self):
+        _, token = create_invitation(
+            company=self.company,
+            email=self.technician.email,
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {"token": token},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_authenticated_matching_user_can_accept_invitation(self):
+        invitation, token = create_invitation(
+            company=self.other_company,
+            email=self.technician.email,
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.other_admin,
+        )
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {"token": token},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.ACCEPTED)
+
+        membership = CompanyMembership.objects.get(
+            user=self.technician,
+            company=self.other_company,
+        )
+        self.assertEqual(membership.status, CompanyMembership.Status.ACTIVE)
+
+    def test_invalid_invitation_token_is_rejected(self):
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {"token": "invalid-token"},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_expired_invitation_is_rejected_and_marked_expired(self):
+        invitation, token = create_invitation(
+            company=self.company,
+            email="expired-tech@example.com",
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = self.client.post(
+            reverse("invitation-accept"),
+            {
+                "token": token,
+                "password": "StrongPassword!2026",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.EXPIRED)
+        self.assertFalse(
+            User.objects.filter(email="expired-tech@example.com").exists()
         )
