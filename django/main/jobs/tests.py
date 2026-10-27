@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import Mock
 
-from main.accounts.models import User
+from main.accounts.models import CompanyMembership, User
 from main.companies.models import (
     Company,
     Customer,
@@ -258,12 +258,21 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
         }
 
     def make_company_admin(self):
-        return User.objects.create_user(
+        user = User.objects.create_user(
             email="webhook-admin@example.com",
             password="TestPassword-123!",
             role="COMPANY_ADMIN",
             company=self.company,
         )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=self.company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
 
     @patch("main.jobs.payment_views.RazorpayService")
     def test_invalid_checkout_signature_is_rejected(
@@ -534,6 +543,79 @@ class RazorpayCheckoutVerificationTests(RazorpayWebhookTests):
         )
 
         self.assertEqual(reponse.status_code, 403)
+
+    def test_admin_in_one_company_cannot_manage_payments_as_technician_in_another(self):
+        other_company = Company.objects.create(
+            name="Second Membership Company",
+            phone="9000000003",
+            email="second-membership@example.com",
+        )
+
+        user = User.objects.create_user(
+            email="multi-company-user@example.com",
+            password="MultiCompanyPassword-123!",
+            role="COMPANY_ADMIN",
+            company=self.company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=self.company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=other_company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        # Keep the invoice in the second company.
+        other_customer = Customer.objects.create(
+            company=other_company,
+            name="Second Company Customer",
+            email="second-customer@example.com",
+        )
+        other_address = CustomerAddress.objects.create(
+            customer=other_customer,
+            label="Test Address",
+            address_line_1="456 Test Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411002",
+            country="India",
+            is_primary=True,
+        )
+        other_job = ServiceJob.objects.create(
+            company=other_company,
+            customer=other_customer,
+            service_address=other_address,
+            title="Second Company Job",
+        )
+        other_invoice = Invoice.objects.create(
+            company=other_company,
+            customer=other_customer,
+            job=other_job,
+            invoice_number="INV-MULTI-COMPANY-TEST",
+            status=Invoice.Status.ISSUED,
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("18.00"),
+            discount_amount=Decimal("0.00"),
+            total_amount=Decimal("118.00"),
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.post(
+            "/api/payments/create-order/",
+            {"invoice_id": str(other_invoice.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_unauthenticated_user_cannot_create_payment_order(self):
         client = APIClient()

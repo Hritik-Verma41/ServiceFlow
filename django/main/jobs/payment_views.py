@@ -20,6 +20,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from main.accounts.models import CompanyMembership
 from main.jobs.models import Invoice, Payment
 from main.jobs.payments import CreatePaymentOrderSerializer, VerifyRazorpayPaymentSerializer
 from main.jobs.services.razorpay_service import RazorpayService
@@ -27,26 +28,25 @@ from main.jobs.services.razorpay_service import RazorpayService
 logger = logging.getLogger(__name__)
 
 def ensure_invoice_payment_access(user, invoice):
-    # Django superusers can manage payemnts for support purposes.
+    # Superusers can manage payemnts for support purposes.
     if user.is_superuser:
         return
 
     allowed_roles = {
-        "COMPANY_ADMIN",
-        "MANAGER",
+        CompanyMembership.Role.COMPANY_ADMIN,
+        CompanyMembership.Role.MANAGER,
     }
 
-    if user.role not in allowed_roles:
-        raise PermissionDenied(
-            "You are not authorized to manage payments."
-        )
+    has_permission = CompanyMembership.objects.filter(
+        user=user,
+        company_id=invoice.company_id,
+        status=CompanyMembership.Status.ACTIVE,
+        role__in=allowed_roles,
+    ).exists()
 
-    if (
-        user.company_id is None
-        or user.company_id != invoice.company_id
-    ):
+    if not has_permission:
         raise PermissionDenied(
-            "You cannot access payments for this company."
+            "You are not authorized to manage payments for this company."
         )
 
 class CreatePaymentOrderView(APIView):
