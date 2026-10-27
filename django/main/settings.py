@@ -32,17 +32,42 @@ if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY must be configured in the environment.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "False").strip().lower() in (
+    "true",
+    "1",
+    "yes",
+)
 
 ALLOWED_HOSTS = [
-    "127.0.0.1",
-    "localhost",
-    "deliver-things-digit-rap.trycloudflare.com",
+    host.strip()
+    for host in os.getenv(
+        "ALLOWED_HOSTS",
+        "127.0.0.1,localhost",
+    ).split(",")
+    if host.strip()
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://deliver-things-digit-rap.trycloudflare.com",
+    origin.strip()
+    for origin in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "",
+    ).split(",")
+    if origin.strip()
 ]
+
+# HTTPS and browser security settings
+SECURE_SSL_REDIRECT = (
+    os.getenv("SECURE_SSL_REDIRECT", "False").strip().lower()
+    in ("true", "1", "yes")
+)
+
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+SECURE_HSTS_SECONDS = int(
+    os.getenv("SECURE_HSTS_SECONDS", "0")
+)
 
 # Application definition
 
