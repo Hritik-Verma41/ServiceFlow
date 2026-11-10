@@ -2,7 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from main.accounts.models import CompanyMembership, User
-from main.companies.models import Company, Customer
+from main.companies.models import Company, Customer, CustomerAddress
 
 
 class CompanyCustomerAPITests(TestCase):
@@ -226,3 +226,209 @@ class CompanyCustomerAPITests(TestCase):
         }
 
         self.assertNotIn(str(self.customer_a.id), customer_ids)
+
+    def customer_address_list_url(self, customer_id=None, company_id=None):
+        company_id = company_id or self.company_a.id
+        customer_id = customer_id or self.customer_a.id
+
+        return (
+            f"/api/companies/{company_id}/"
+            f"customers/{customer_id}/addresses/"
+        )
+
+    def customer_address_detail_url(
+        self,
+        address_id,
+        customer_id=None,
+        company_id=None,
+    ):
+        return (
+            f"{self.customer_address_list_url(customer_id, company_id)}"
+            f"{address_id}/"
+        )
+
+    def create_test_address(self, customer=None):
+        return CustomerAddress.objects.create(
+            customer=customer or self.customer_a,
+            label="Office",
+            address_line_1="123 Test Street",
+            address_line_2="Floor 2",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+            is_primary=False,
+        )
+
+    def test_active_member_can_list_customer_addresses(self):
+        address = self.create_test_address()
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            self.customer_address_list_url()
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(address.id))
+
+    def test_company_admin_can_create_customer_address(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.customer_address_list_url(),
+            {
+                "label": "Office",
+                "address_line_1": "123 Test Street",
+                "address_line_2": "Floor 2",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "postal_code": "411001",
+                "country": "India",
+                "is_primary": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        address = CustomerAddress.objects.get(
+            id=response.data["id"]
+        )
+        self.assertEqual(address.customer, self.customer_a)
+
+    def test_request_cannot_override_customer_from_url(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.customer_address_list_url(),
+            {
+                "customer": str(self.customer_b.id),
+                "label": "Office",
+                "address_line_1": "123 Test Street",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "postal_code": "411001",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        address = CustomerAddress.objects.get(
+            id=response.data["id"]
+        )
+        self.assertEqual(address.customer, self.customer_a)
+
+    def test_technician_cannot_create_customer_address(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.customer_address_list_url(),
+            {
+                "label": "Office",
+                "address_line_1": "123 Test Street",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "postal_code": "411001",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(CustomerAddress.objects.count(), 0)
+
+    def test_active_member_can_retrieve_customer_address(self):
+        address = self.create_test_address()
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            self.customer_address_detail_url(address.id)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(address.id))
+
+    def test_company_admin_can_update_customer_address(self):
+        address = self.create_test_address()
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.customer_address_detail_url(address.id),
+            {"city": "Mumbai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        address.refresh_from_db()
+        self.assertEqual(address.city, "Mumbai")
+
+    def test_technician_cannot_update_customer_address(self):
+        address = self.create_test_address()
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            self.customer_address_detail_url(address.id),
+            {"city": "Mumbai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        address.refresh_from_db()
+        self.assertEqual(address.city, "Pune")
+
+    def test_company_admin_can_delete_customer_address(self):
+        address = self.create_test_address()
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(
+            self.customer_address_detail_url(address.id)
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(
+            CustomerAddress.objects.filter(id=address.id).exists()
+        )
+
+    def test_address_from_another_customer_cannot_be_retrieved(self):
+        other_customer = Customer.objects.create(
+            company=self.company_a,
+            name="Another Customer",
+            email="another@example.com",
+        )
+        address = self.create_test_address(customer=other_customer)
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.customer_address_detail_url(address.id)
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_company_customer_addresses_cannot_be_accessed(self):
+        address = self.create_test_address(customer=self.customer_b)
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.customer_address_list_url(
+                customer_id=self.customer_b.id,
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_unauthenticated_user_cannot_list_customer_addresses(self):
+        response = self.client.get(
+            self.customer_address_list_url()
+        )
+
+        self.assertEqual(response.status_code, 401)
