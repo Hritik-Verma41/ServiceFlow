@@ -142,3 +142,87 @@ class CompanyCustomerAPITests(TestCase):
         response = self.client.get(self.url())
 
         self.assertEqual(response.status_code, 401)
+
+    def customer_detail_url(self, customer_id, company_id=None):
+        company_id = company_id or self.company_a.id
+        return (
+            f"/api/companies/{company_id}/"
+            f"customers/{customer_id}/"
+        )
+
+    def test_active_member_can_retrieve_customer(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            self.customer_detail_url(self.customer_a.id)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(self.customer_a.id))
+
+    def test_company_admin_can_update_customer(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.customer_detail_url(self.customer_a.id),
+            {"name": "Updated Customer"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.customer_a.refresh_from_db()
+        self.assertEqual(self.customer_a.name, "Updated Customer")
+
+    def test_technician_cannot_update_customer(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            self.customer_detail_url(self.customer_a.id),
+            {"name": "Unauthorized Update"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.customer_a.refresh_from_db()
+        self.assertEqual(self.customer_a.name, "Customer A")
+
+    def test_other_company_customer_cannot_be_retrieved(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.customer_detail_url(self.customer_b.id)
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_company_admin_can_soft_deactivate_customer(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(
+            self.customer_detail_url(self.customer_a.id)
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+        self.customer_a.refresh_from_db()
+        self.assertFalse(self.customer_a.is_active)
+
+    def test_deactivated_customer_is_not_in_customer_list(self):
+        self.customer_a.is_active = False
+        self.customer_a.save(update_fields=["is_active"])
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(self.url())
+
+        self.assertEqual(response.status_code, 200)
+
+        customer_ids = {
+            item["id"] for item in response.data["results"]
+        } if isinstance(response.data, dict) and "results" in response.data else {
+            item["id"] for item in response.data
+        }
+
+        self.assertNotIn(str(self.customer_a.id), customer_ids)
