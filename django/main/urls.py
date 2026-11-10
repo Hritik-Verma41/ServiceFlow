@@ -29,6 +29,10 @@ urlpatterns = [
     ),
     path(
         "api/",
+        include("main.companies.urls"),
+    ),
+    path(
+        "api/",
         include("main.jobs.urls"),
     ),
     path(
