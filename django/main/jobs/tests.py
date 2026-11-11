@@ -21,7 +21,7 @@ from main.companies.models import (
     Customer,
     CustomerAddress,
 )
-from main.jobs.models import Invoice, Payment, ServiceJob
+from main.jobs.models import Invoice, JobNote, Payment, ServiceJob
 from main.jobs.services.razorpay_service import RazorpayService
 
 
@@ -1408,3 +1408,225 @@ class ServiceJobStatusAPITests(TestCase):
 
         job.refresh_from_db()
         self.assertEqual(job.status, ServiceJob.Status.NEW)
+
+class ServiceJobNoteAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Job Note Test Company",
+            phone="9000000020",
+            email="job-note-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Job Note Company",
+            phone="9000000021",
+            email="other-job-note-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Note Test Customer",
+            email="note-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Note Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "note-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.technician = self.create_user(
+            "note-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_technician = self.create_user(
+            "other-note-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_admin = self.create_user(
+            "other-note-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.assigned_job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=self.technician,
+            title="Assigned Note Test Job",
+        )
+
+        self.unassigned_job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            title="Unassigned Note Test Job",
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/"
+            f"jobs/{self.assigned_job.id}/notes/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def get_note_list(self, response):
+        if isinstance(response.data, dict):
+            return response.data.get("results", [])
+
+        return response.data
+
+    def test_company_admin_can_list_job_notes_oldest_first(self):
+        self.client.force_authenticate(user=self.admin)
+
+        first_note = JobNote.objects.create(
+            job=self.assigned_job,
+            created_by=self.admin,
+            note="First note",
+        )
+
+        second_note = JobNote.objects.create(
+            job=self.assigned_job,
+            created_by=self.admin,
+            note="Second note",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+
+        notes = self.get_note_list(response)
+
+        self.assertEqual(
+            [note["id"] for note in notes],
+            [str(first_note.id), str(second_note.id)],
+        )
+
+    def test_company_admin_can_create_job_note(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {"note": "Technician reported the issue."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        note = JobNote.objects.get(id=response.data["id"])
+
+        self.assertEqual(note.job, self.assigned_job)
+        self.assertEqual(note.created_by, self.admin)
+        self.assertEqual(
+            note.note,
+            "Technician reported the issue.",
+        )
+
+    def test_client_cannot_override_job_or_note_author(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.unassigned_job.id),
+                "created_by": str(self.other_admin.id),
+                "note": "Testing protected fields.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        note = JobNote.objects.get(id=response.data["id"])
+
+        self.assertEqual(note.job, self.assigned_job)
+        self.assertEqual(note.created_by, self.admin)
+
+    def test_assigned_technician_can_create_job_note(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            {"note": "Work has started."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        note = JobNote.objects.get(id=response.data["id"])
+        self.assertEqual(note.created_by, self.technician)
+
+    def test_technician_cannot_access_another_technicians_job_notes(self):
+        self.client.force_authenticate(user=self.other_technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_technician_cannot_access_unassigned_job_notes(self):
+        self.client.force_authenticate(user=self.technician)
+
+        url = (
+            f"/api/companies/{self.company.id}/"
+            f"jobs/{self.unassigned_job.id}/notes/"
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_company_member_cannot_access_job_notes(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_user_cannot_access_job_notes(self):
+        response = self.client.get(self.url)
+
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_empty_note_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {"note": ""},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobNote.objects.count(), 0)

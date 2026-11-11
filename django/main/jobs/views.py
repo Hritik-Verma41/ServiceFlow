@@ -12,8 +12,8 @@ from main.accounts.permissions import (
 )
 from main.companies.models import Company
 
-from .models import ServiceJob
-from .serializers import ServiceJobSerializer
+from .models import JobNote, ServiceJob
+from .serializers import JobNoteSerializer, ServiceJobSerializer
 
 
 class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
@@ -249,4 +249,52 @@ class CompanyServiceJobStatusView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-    
+class CompanyServiceJobNoteListCreateView(generics.ListCreateAPIView):
+    serializer_class = JobNoteSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_job(self):
+        company = self.get_company()
+
+        queryset = ServiceJob.objects.filter(company=company)
+
+        if not self.request.user.is_superuser:
+            membership = get_object_or_404(
+                CompanyMembership,
+                user=self.request.user,
+                company=company,
+                status=CompanyMembership.Status.ACTIVE,
+            )
+
+            if membership.role == CompanyMembership.Role.TECHNICIAN:
+                queryset = queryset.filter(
+                    assigned_technician=self.request.user,
+                )
+        
+        return get_object_or_404(
+            queryset,
+            id=self.kwargs["job_id"],
+        )
+
+    def get_queryset(self):
+        return JobNote.objects.filter(
+            job=self.get_job(),
+        ).select_related(
+            "created_by",
+        ).order_by(
+            "created_at",
+            "id",
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(
+            job=self.get_job(),
+            created_by=self.request.user,
+        )

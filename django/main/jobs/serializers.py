@@ -2,7 +2,8 @@ from rest_framework import serializers
 
 from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
-from .models import ServiceJob
+
+from .models import JobNote, ServiceJob
 
 class ServiceJobSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
@@ -97,3 +98,22 @@ class ServiceJobSerializer(serializers.ModelSerializer):
             })
 
         return attrs
+
+class JobNoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JobNote
+        fields = [
+            "id",
+            "job",
+            "created_by",
+            "note",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "job",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
