@@ -877,3 +877,326 @@ class RazorpayOrderConcurrencyTests(TransactionTestCase):
             1,
         )
         mock_client.order.create.assert_called_once()
+
+class ServiceJobAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Service Job Test Company",
+            phone="9000000000",
+            email="service-job-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Service Job Company",
+            phone="9000000001",
+            email="other-service-job@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Test Customer",
+            email="customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Test Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+            is_primary=True,
+        )
+
+        self.other_customer = Customer.objects.create(
+            company=self.other_company,
+            name="Other Customer",
+            email="other-customer@example.com",
+        )
+
+        self.other_address = CustomerAddress.objects.create(
+            customer=self.other_customer,
+            label="Primary",
+            address_line_1="456 Other Street",
+            city="Mumbai",
+            state="Maharashtra",
+            postal_code="400001",
+            country="India",
+            is_primary=True,
+        )
+
+        self.admin = self.create_user(
+            "job-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.technician = self.create_user(
+            "job-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_admin = self.create_user(
+            "other-job-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.assigned_job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=self.technician,
+            title="Assigned Service Job",
+        )
+
+        self.unassigned_job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            title="Unassigned Service Job",
+        )
+
+        self.other_company_job = ServiceJob.objects.create(
+            company=self.other_company,
+            customer=self.other_customer,
+            service_address=self.other_address,
+            title="Other Company Job",
+        )
+
+        self.list_url = (
+            f"/api/companies/{self.company.id}/jobs/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def get_list_data(self, response):
+        if isinstance(response.data, dict):
+            return response.data.get("results", [])
+
+        return response.data
+
+    def test_company_admin_can_list_all_company_jobs(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+
+        job_ids = {
+            str(job["id"])
+            for job in self.get_list_data(response)
+        }
+
+        self.assertIn(str(self.assigned_job.id), job_ids)
+        self.assertIn(str(self.unassigned_job.id), job_ids)
+        self.assertNotIn(str(self.other_company_job.id), job_ids)
+
+    def test_technician_can_only_list_assigned_jobs(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+
+        job_ids = {
+            str(job["id"])
+            for job in self.get_list_data(response)
+        }
+
+        self.assertIn(str(self.assigned_job.id), job_ids)
+        self.assertNotIn(str(self.unassigned_job.id), job_ids)
+
+    def test_company_admin_can_create_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.customer.id),
+                "service_address": str(self.address.id),
+                "title": "New Service Job",
+                "description": "Test job description",
+                "priority": ServiceJob.Priority.HIGH,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        job = ServiceJob.objects.get(id=response.data["id"])
+
+        self.assertEqual(job.company, self.company)
+        self.assertEqual(job.customer, self.customer)
+        self.assertEqual(job.service_address, self.address)
+        self.assertEqual(job.title, "New Service Job")
+
+    def test_request_cannot_override_company_during_creation(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "company": str(self.other_company.id),
+                "customer": str(self.customer.id),
+                "service_address": str(self.address.id),
+                "title": "Company Override Test",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        job = ServiceJob.objects.get(id=response.data["id"])
+        self.assertEqual(job.company, self.company)
+
+    def test_technician_cannot_create_job(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.customer.id),
+                "service_address": str(self.address.id),
+                "title": "Technician Created Job",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_job_cannot_use_customer_from_another_company(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.other_customer.id),
+                "service_address": str(self.other_address.id),
+                "title": "Invalid Customer Job",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_job_address_must_belong_to_selected_customer(self):
+        self.client.force_authenticate(user=self.admin)
+
+        another_customer = Customer.objects.create(
+            company=self.company,
+            name="Another Customer",
+            email="another-customer@example.com",
+        )
+
+        another_address = CustomerAddress.objects.create(
+            customer=another_customer,
+            label="Primary",
+            address_line_1="789 Test Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411002",
+            country="India",
+        )
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.customer.id),
+                "service_address": str(another_address.id),
+                "title": "Mismatched Address Job",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("service_address", response.data)
+
+    def test_active_member_can_retrieve_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            str(response.data["id"]),
+            str(self.assigned_job.id),
+        )
+
+    def test_company_admin_can_update_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{self.assigned_job.id}/",
+            {"title": "Updated Service Job"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assigned_job.refresh_from_db()
+        self.assertEqual(
+            self.assigned_job.title,
+            "Updated Service Job",
+        )
+
+    def test_technician_cannot_update_job(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            f"{self.list_url}{self.assigned_job.id}/",
+            {"title": "Technician Updated Job"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_technician_cannot_retrieve_another_technicians_job(self):
+        another_technician = self.create_user(
+            "another-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.client.force_authenticate(user=another_technician)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_company_member_cannot_access_job(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_user_cannot_list_jobs(self):
+        response = self.client.get(self.list_url)
+
+        self.assertIn(response.status_code, (401, 403))

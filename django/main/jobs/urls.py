@@ -6,6 +6,10 @@ from main.jobs.payment_views import (
     razorpay_checkout_page,
     razorpay_webhook,
 )
+from main.jobs.views import (
+    CompanyServiceJobDetailView,
+    CompanyServiceJobListCreateView,
+)
 
 
 urlpatterns = [
@@ -28,5 +32,15 @@ urlpatterns = [
         "payments/webhook/",
         razorpay_webhook,
         name="razorpay-webhook",
-    )
+    ),
+    path(
+        "companies/<uuid:company_id>/jobs/",
+        CompanyServiceJobListCreateView.as_view(),
+        name="company-service-job-list-create",
+    ),
+    path(
+        "companies/<uuid:company_id>/jobs/<uuid:job_id>/",
+        CompanyServiceJobDetailView.as_view(),
+        name="company-service-job-detail",
+    ),
 ]
