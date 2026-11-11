@@ -21,7 +21,7 @@ from main.companies.models import (
     Customer,
     CustomerAddress,
 )
-from main.jobs.models import Invoice, JobNote, Payment, ServiceJob
+from main.jobs.models import Invoice, JobNote, Part, Payment, ServiceJob
 from main.jobs.services.razorpay_service import RazorpayService
 
 
@@ -1630,3 +1630,202 @@ class ServiceJobNoteAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(JobNote.objects.count(), 0)
+
+class PartAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Parts Test Company",
+            phone="9000000030",
+            email="parts-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Parts Company",
+            phone="9000000031",
+            email="other-parts@example.com",
+        )
+
+        self.admin = self.create_user(
+            "parts-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.technician = self.create_user(
+            "parts-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_admin = self.create_user(
+            "other-parts-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.url = f"/api/companies/{self.company.id}/parts/"
+
+        self.part = Part.objects.create(
+            company=self.company,
+            name="Test Motor",
+            part_number="MTR-001",
+            unit_price=Decimal("1500.00"),
+            stock_quantity=Decimal("10.00"),
+            reorder_level=Decimal("2.00"),
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def test_active_member_can_list_company_parts(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+    def test_admin_can_create_part(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "New Motor",
+                "part_number": "MTR-002",
+                "unit_price": "2500.00",
+                "reorder_level": "5.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        part = Part.objects.get(id=response.data["id"])
+        self.assertEqual(part.company, self.company)
+        self.assertEqual(part.stock_quantity, Decimal("0.00"))
+
+    def test_client_cannot_override_company_or_stock(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "company": str(self.other_company.id),
+                "name": "Protected Part",
+                "unit_price": "100.00",
+                "stock_quantity": "500.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        part = Part.objects.get(id=response.data["id"])
+        self.assertEqual(part.company, self.company)
+        self.assertEqual(part.stock_quantity, Decimal("0.00"))
+
+    def test_technician_cannot_create_part(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Technician Part",
+                "unit_price": "100.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_update_part(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{self.part.id}/",
+            {"name": "Updated Motor"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.part.refresh_from_db()
+        self.assertEqual(self.part.name, "Updated Motor")
+
+    def test_technician_cannot_update_part(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            f"{self.url}{self.part.id}/",
+            {"name": "Unauthorized Update"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_soft_delete_part(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(
+            f"{self.url}{self.part.id}/"
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+        self.part.refresh_from_db()
+        self.assertFalse(self.part.is_active)
+
+    def test_cannot_access_part_from_another_company(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(
+            f"{self.url}{self.part.id}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_negative_unit_price_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Invalid Part",
+                "unit_price": "-100.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_negative_reorder_level_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Invalid Reorder Part",
+                "unit_price": "100.00",
+                "reorder_level": "-5.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)

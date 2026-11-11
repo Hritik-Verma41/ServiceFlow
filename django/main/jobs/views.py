@@ -12,8 +12,8 @@ from main.accounts.permissions import (
 )
 from main.companies.models import Company
 
-from .models import JobNote, ServiceJob
-from .serializers import JobNoteSerializer, ServiceJobSerializer
+from .models import JobNote, Part, ServiceJob
+from .serializers import JobNoteSerializer, PartSerializer, ServiceJobSerializer
 
 
 class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
@@ -298,3 +298,67 @@ class CompanyServiceJobNoteListCreateView(generics.ListCreateAPIView):
             job=self.get_job(),
             created_by=self.request.user,
         )
+
+class CompanyPartListCreateView(generics.ListCreateAPIView):
+    serializer_class = PartSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            permission_classes = [
+                IsAuthenticated,
+                IsCompanyAdminOrManager,
+            ]
+        else:
+            permission_classes = self.permission_classes
+
+        return [permission() for permission in permission_classes]
+
+    def get_queryset(self):
+        return Part.objects.filter(
+            company=self.get_company(),
+            is_active=True,
+        ).order_by("name")
+
+    def perform_create(self, serializer):
+        serializer.save(company=self.get_company())
+
+class CompanyPartDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = PartSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+    lookup_url_kwarg = "part_id"
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_permissions(self):
+        if self.request.method in ["PUT", "PATCH", "DELETE"]:
+            permission_classes = [
+                IsAuthenticated,
+                IsCompanyAdminOrManager,
+            ]
+        else:
+            permission_classes = self.permission_classes
+
+        return [permission() for permission in permission_classes]
+
+    def get_queryset(self):
+        return Part.objects.filter(
+            company=self.get_company(),
+            is_active=True,
+        )
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])

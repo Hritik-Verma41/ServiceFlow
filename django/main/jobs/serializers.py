@@ -3,7 +3,7 @@ from rest_framework import serializers
 from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
 
-from .models import JobNote, ServiceJob
+from .models import JobNote, Part, ServiceJob
 
 class ServiceJobSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
@@ -117,3 +117,41 @@ class JobNoteSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+class PartSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Part
+        fields = [
+            "id",
+            "company",
+            "name",
+            "part_number",
+            "description",
+            "unit_price",
+            "stock_quantity",
+            "reorder_level",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "company",
+            "stock_quantity",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_unit_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError(
+                "Unit price cannot be negative."
+            )
+        return value
+
+    def validate_reorder_level(self, value):
+        if value < 0:
+            raise serializers.ValidationError(
+                "Reorder level cannot be negative."
+            )
+        return value
