@@ -1200,3 +1200,211 @@ class ServiceJobAPITests(TestCase):
         response = self.client.get(self.list_url)
 
         self.assertIn(response.status_code, (401, 403))
+
+class ServiceJobStatusAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Service Status Test Comopany",
+            phone="9000000010",
+            email="job-status-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Status Test Customer",
+            email="status-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Status Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "status-admin@example.com",
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "status-manager@example.com",
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.technician = self.create_user(
+            "status-technician@example.com",
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_technician = self.create_user(
+            "other-status-technician@example.com",
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+    def create_user(self, email, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=self.company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=self.company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def create_job(self, status, technician=None):
+        return ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=technician,
+            title="Status Test Job",
+            status=status,
+        )
+
+    def get_status_url(self, job):
+        return (
+            f"/api/companies/{self.company.id}/"
+            f"jobs/{job.id}/status/"
+        )
+
+    def test_admin_can_schedule_new_job(self):
+        job = self.create_job(ServiceJob.Status.NEW)
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.SCHEDULED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.SCHEDULED)
+
+    def test_manager_can_cancel_scheduled_job(self):
+        job = self.create_job(ServiceJob.Status.SCHEDULED)
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.CANCELLED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.CANCELLED)
+
+    def test_assigned_technician_can_start_scheduled_job(self):
+        job = self.create_job(
+            ServiceJob.Status.SCHEDULED,
+            technician=self.technician,
+        )
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.IN_PROGRESS},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.IN_PROGRESS)
+        self.assertIsNotNone(job.started_at)
+
+    def test_assigned_technician_can_complete_job(self):
+        job = self.create_job(
+            ServiceJob.Status.IN_PROGRESS,
+            technician=self.technician,
+        )
+        job.started_at = timezone.now()
+        job.save(update_fields=["started_at"])
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.COMPLETED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.COMPLETED)
+        self.assertIsNotNone(job.started_at)
+        self.assertIsNotNone(job.completed_at)
+
+    def test_technician_cannot_schedule_job(self):
+        job = self.create_job(
+            ServiceJob.Status.NEW,
+            technician=self.technician,
+        )
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.SCHEDULED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unassigned_technician_cannot_start_job(self):
+        job = self.create_job(ServiceJob.Status.SCHEDULED)
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.IN_PROGRESS},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_another_technician_cannot_start_assigned_job(self):
+        job = self.create_job(
+            ServiceJob.Status.SCHEDULED,
+            technician=self.technician,
+        )
+        self.client.force_authenticate(user=self.other_technician)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.IN_PROGRESS},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_invalid_status_transition_is_rejected(self):
+        job = self.create_job(ServiceJob.Status.NEW)
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.COMPLETED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.NEW)

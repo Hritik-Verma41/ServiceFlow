@@ -9,6 +9,7 @@ from main.jobs.payment_views import (
 from main.jobs.views import (
     CompanyServiceJobDetailView,
     CompanyServiceJobListCreateView,
+    CompanyServiceJobStatusView,
 )
 
 
@@ -42,5 +43,10 @@ urlpatterns = [
         "companies/<uuid:company_id>/jobs/<uuid:job_id>/",
         CompanyServiceJobDetailView.as_view(),
         name="company-service-job-detail",
+    ),
+    path(
+        "companies/<uuid:company_id>/jobs/<uuid:job_id>/status/",
+        CompanyServiceJobStatusView.as_view(),
+        name="company-service-job-status",
     ),
 ]
