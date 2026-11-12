@@ -27,6 +27,19 @@ class ServiceJobSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    labor_hours = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+    )
+
+    labor_rate = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+    )
 
     class Meta:
         model = ServiceJob
@@ -40,6 +53,8 @@ class ServiceJobSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "priority",
+            "labor_hours",
+            "labor_rate",
             "scheduled_start",
             "scheduled_end",
             "started_at",

@@ -1059,6 +1059,8 @@ class ServiceJobAPITests(TestCase):
         self.assertEqual(job.customer, self.customer)
         self.assertEqual(job.service_address, self.address)
         self.assertEqual(job.title, "New Service Job")
+        self.assertEqual(job.labor_hours, Decimal("0"))
+        self.assertEqual(job.labor_rate, Decimal("0"))
 
     def test_request_cannot_override_company_during_creation(self):
         self.client.force_authenticate(user=self.admin)
@@ -1210,6 +1212,64 @@ class ServiceJobAPITests(TestCase):
         response = self.client.get(self.list_url)
 
         self.assertIn(response.status_code, (401, 403))
+
+    def test_company_admin_can_create_job_with_labor_pricing(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.customer.id),
+                "service_address": str(self.address.id),
+                "title": "Labor Pricing Job",
+                "labor_hours": "2.50",
+                "labor_rate": "750.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        job = ServiceJob.objects.get(id=response.data["id"])
+        self.assertEqual(job.labor_hours, Decimal("2.50"))
+        self.assertEqual(job.labor_rate, Decimal("750.00"))
+
+    def test_negative_labor_values_are_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer": str(self.customer.id),
+                "service_address": str(self.address.id),
+                "title": "Invalid Labor Job",
+                "labor_hours": "-1.00",
+                "labor_rate": "-500.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("labor_hours", response.data)
+        self.assertIn("labor_rate", response.data)
+
+    def test_company_admin_can_update_job_labor_pricing(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{self.assigned_job.id}/",
+            {
+                "labor_hours": "3.00",
+                "labor_rate": "800.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assigned_job.refresh_from_db()
+        self.assertEqual(self.assigned_job.labor_hours, Decimal("3.00"))
+        self.assertEqual(self.assigned_job.labor_rate, Decimal("800.00"))
 
 class ServiceJobStatusAPITests(TestCase):
     def setUp(self):
@@ -2880,3 +2940,77 @@ class InvoiceAPITests(TestCase):
         )
 
         self.assertIn(response.status_code, (401, 403))
+
+    def test_invoice_creation_generates_labor_and_parts_items(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.job.labor_hours = Decimal("2.50")
+        self.job.labor_rate = Decimal("800.00")
+        self.job.save(update_fields=["labor_hours", "labor_rate"])
+
+        part = Part.objects.create(
+            company=self.company,
+            name="Replacement Motor",
+            unit_price=Decimal("1800.00"),
+            stock_quantity=Decimal("10.00"),
+        )
+
+        # Historical price differs from the current catalog price.
+        JobPart.objects.create(
+            job=self.job,
+            part=part,
+            quantity=Decimal("2.00"),
+            unit_price=Decimal("1500.00"),
+        )
+
+        response = self.client.post(
+            self.url,
+            {"job": str(self.job.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        invoice = Invoice.objects.get(job=self.job)
+        items = invoice.items.all()
+
+        self.assertEqual(items.count(), 2)
+
+        labor_item = items.get(
+            item_type=InvoiceItem.ItemType.LABOR,
+        )
+        self.assertEqual(labor_item.quantity, Decimal("2.50"))
+        self.assertEqual(labor_item.unit_price, Decimal("800.00"))
+        self.assertEqual(labor_item.amount, Decimal("2000.00"))
+
+        part_item = items.get(
+            item_type=InvoiceItem.ItemType.PART,
+        )
+        self.assertEqual(part_item.description, "Replacement Motor")
+        self.assertEqual(part_item.quantity, Decimal("2.00"))
+        self.assertEqual(part_item.unit_price, Decimal("1500.00"))
+        self.assertEqual(part_item.amount, Decimal("3000.00"))
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.subtotal, Decimal("5000.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("900.00"))
+        self.assertEqual(invoice.total_amount, Decimal("5900.00"))
+
+    def test_invoice_creation_skips_labor_item_when_labor_hours_are_zero(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {"job": str(self.job.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        invoice = Invoice.objects.get(job=self.job)
+
+        self.assertFalse(
+            invoice.items.filter(
+                item_type=InvoiceItem.ItemType.LABOR,
+            ).exists()
+        )

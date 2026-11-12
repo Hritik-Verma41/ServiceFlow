@@ -17,6 +17,7 @@ from main.companies.models import Company
 
 from .models import (
     Invoice,
+    InvoiceItem,
     JobNote,
     JobPart,
     Part,
@@ -637,6 +638,28 @@ class CompanyInvoiceListCreateView(generics.ListCreateAPIView):
                 invoice_number=invoice_number,
                 status=Invoice.Status.DRAFT,
             )
+
+            # Generate labor invoice item
+            if job.labor_hours > 0:
+                InvoiceItem.objects.create(
+                    invoice=invoice,
+                    item_type=InvoiceItem.ItemType.LABOR,
+                    description=f"Labor ({job.labor_hours} hours)",
+                    quantity=job.labor_hours,
+                    unit_price=job.labor_rate,
+                )
+
+            # Generate invoice items for consumed parts.
+            job_parts = job.parts_used.select_related("part").all()
+
+            for job_part in job_parts:
+                InvoiceItem.objects.create(
+                    invoice=invoice,
+                    item_type=InvoiceItem.ItemType.PART,
+                    description=job_part.part.name,
+                    quantity=job_part.quantity,
+                    unit_price=job_part.unit_price,
+                )
 
         response_serializer = InvoiceSerializer(
             invoice,

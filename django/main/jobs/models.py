@@ -69,6 +69,18 @@ class ServiceJob(models.Model):
         default=Priority.MEDIUM,
     )
 
+    labor_hours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=0,
+    )
+
+    labor_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+
     scheduled_start = models.DateTimeField(
         null=True,
         blank=True,
