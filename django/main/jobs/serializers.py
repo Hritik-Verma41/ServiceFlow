@@ -1,9 +1,12 @@
+from decimal import Decimal
+
+from django.db import models
 from rest_framework import serializers
 
 from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
 
-from .models import JobNote, Part, ServiceJob
+from .models import JobNote, Part, ServiceJob, StockMovement
 
 class ServiceJobSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
@@ -155,3 +158,23 @@ class PartSerializer(serializers.ModelSerializer):
                 "Reorder level cannot be negative."
             )
         return value
+
+class StockAdjustmentSerializer(serializers.Serializer):
+    class AdjustmentType(models.TextChoices):
+        INCREASE = 'INCREASE', 'Increase'
+        DECREASE = 'DECREASE', 'Decrease'
+
+    movement_type = serializers.ChoiceField(
+        choices=AdjustmentType.choices,
+    )
+
+    quantity = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+    )
+
+    reason = serializers.CharField(
+        max_length=255,
+        trim_whitespace=True,
+    )

@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
@@ -12,8 +13,13 @@ from main.accounts.permissions import (
 )
 from main.companies.models import Company
 
-from .models import JobNote, Part, ServiceJob
-from .serializers import JobNoteSerializer, PartSerializer, ServiceJobSerializer
+from .models import JobNote, Part, ServiceJob, StockMovement
+from .serializers import (
+    JobNoteSerializer,
+    PartSerializer,
+    ServiceJobSerializer,
+    StockAdjustmentSerializer,
+)
 
 
 class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
@@ -362,3 +368,77 @@ class CompanyPartDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save(update_fields=["is_active", "updated_at"])
+
+class CompanyPartStockAdjustmentView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def post(self, request, *args, **kwargs):
+        serializer = StockAdjustmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        movement_type = serializer.validated_data["movement_type"]
+        quantity = serializer.validated_data["quantity"]
+        reason = serializer.validated_data["reason"]
+
+        with transaction.atomic():
+            part = get_object_or_404(
+                Part.objects.select_for_update(),
+                id=self.kwargs["part_id"],
+                company=self.get_company(),
+                is_active=True,
+            )
+
+            previous_stock = part.stock_quantity
+
+            if movement_type == StockMovement.MovementType.INCREASE:
+                resulting_stock = previous_stock + quantity
+            else:
+                resulting_stock = previous_stock - quantity
+
+                if resulting_stock < 0:
+                    return Response(
+                        {
+                            "detail": (
+                                "Insufficient stock for this adjustment."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            part.stock_quantity = resulting_stock
+            part.save(update_fields=["stock_quantity", "updated_at"])
+
+            movement = StockMovement.objects.create(
+                part=part,
+                movement_type=movement_type,
+                quantity=quantity,
+                previous_stock=previous_stock,
+                resulting_stock=resulting_stock,
+                reason=reason,
+                created_by=request.user,
+            )
+
+        return Response(
+            {
+                "id": str(movement.id),
+                "part": str(part.id),
+                "movement_type": movement.movement_type,
+                "quantity": movement.quantity,
+                "previous_stock": movement.previous_stock,
+                "resulting_stock": movement.resulting_stock,
+                "reason": movement.reason,
+                "created_by": str(movement.created_by_id),
+                "created_at": movement.created_at,
+            },
+            status=status.HTTP_200_OK,
+        )

@@ -21,7 +21,14 @@ from main.companies.models import (
     Customer,
     CustomerAddress,
 )
-from main.jobs.models import Invoice, JobNote, Part, Payment, ServiceJob
+from main.jobs.models import (
+    Invoice,
+    JobNote,
+    Part,
+    Payment,
+    ServiceJob,
+    StockMovement,
+)
 from main.jobs.services.razorpay_service import RazorpayService
 
 
@@ -1829,3 +1836,259 @@ class PartAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+class PartStockAdjustmentAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Stock Adjustment Company",
+            phone="9000000040",
+            email="stock-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Stock Company",
+            phone="9000000041",
+            email="other-stock@example.com",
+        )
+
+        self.admin = self.create_user(
+            "stock-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "stock-manager@example.com",
+            self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.technician = self.create_user(
+            "stock-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_admin = self.create_user(
+            "other-stock-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.part = Part.objects.create(
+            company=self.company,
+            name="Stock Test Motor",
+            unit_price=Decimal("1500.00"),
+            stock_quantity=Decimal("10.00"),
+            reorder_level=Decimal("2.00"),
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/"
+            f"parts/{self.part.id}/adjust-stock/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def test_admin_can_increase_stock(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "5.00",
+                "reason": "New stock received",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("15.00"),
+        )
+
+        movement = StockMovement.objects.get(part=self.part)
+
+        self.assertEqual(movement.movement_type, "INCREASE")
+        self.assertEqual(movement.quantity, Decimal("5.00"))
+        self.assertEqual(movement.previous_stock, Decimal("10.00"))
+        self.assertEqual(movement.resulting_stock, Decimal("15.00"))
+        self.assertEqual(movement.created_by, self.admin)
+
+    def test_manager_can_decrease_stock(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "DECREASE",
+                "quantity": "3.00",
+                "reason": "Damaged inventory",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("7.00"),
+        )
+
+        movement = StockMovement.objects.get(part=self.part)
+        self.assertEqual(movement.previous_stock, Decimal("10.00"))
+        self.assertEqual(movement.resulting_stock, Decimal("7.00"))
+
+    def test_insufficient_stock_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "DECREASE",
+                "quantity": "15.00",
+                "reason": "Inventory correction",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("10.00"),
+        )
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_technician_cannot_adjust_stock(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "5.00",
+                "reason": "Unauthorized adjustment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_other_company_admin_cannot_adjust_stock(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "5.00",
+                "reason": "Unauthorized adjustment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_zero_quantity_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "0.00",
+                "reason": "Invalid adjustment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_negative_quantity_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "-5.00",
+                "reason": "Invalid adjustment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_blank_reason_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "5.00",
+                "reason": "   ",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_invalid_movement_type_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "TRANSFER",
+                "quantity": "5.00",
+                "reason": "Invalid movement",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_unauthenticated_user_cannot_adjust_stock(self):
+        response = self.client.post(
+            self.url,
+            {
+                "movement_type": "INCREASE",
+                "quantity": "5.00",
+                "reason": "Unauthenticated adjustment",
+            },
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (401, 403))
+        self.assertEqual(StockMovement.objects.count(), 0)
