@@ -17,9 +17,16 @@ from .serializers import (
     CustomerSerializer,
 )
 
-class CompanyCreateView(generics.CreateAPIView):
+class CompanyListCreateView(generics.ListCreateAPIView):
     serializer_class = CompanyCreateSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Company.objects.filter(
+            memberships__user=self.request.user,
+            memberships__status=CompanyMembership.Status.ACTIVE,
+            is_active=True,
+        ).distinct().order_by("name")
 
     @transaction.atomic
     def perform_create(self, serializer):

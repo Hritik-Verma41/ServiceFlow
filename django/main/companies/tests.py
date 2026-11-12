@@ -494,3 +494,119 @@ class CompanyCreateAPITests(TestCase):
                 name="Unauthorized Company"
             ).exists()
         )
+
+class CompanyListAPITests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(
+            email="company-owner@example.com",
+            password="TestPassword123!",
+        )
+        cls.other_user = User.objects.create_user(
+            email="other-owner@example.com",
+            password="TestPassword123!",
+        )
+
+        cls.company_a = Company.objects.create(
+            name="Alpha Services",
+            phone="1111111111",
+            email="alpha@example.com",
+        )
+        cls.company_b = Company.objects.create(
+            name="Beta Services",
+            phone="2222222222",
+            email="beta@example.com",
+        )
+        cls.inactive_company = Company.objects.create(
+            name="Inactive Services",
+            phone="3333333333",
+            email="inactive@example.com",
+            is_active=False,
+        )
+        invited_company = Company.objects.create(
+            name="Invited Services",
+            phone="5555555555",
+            email="invited@example.com",
+        )
+        suspended_company = Company.objects.create(
+            name="Suspended Services",
+            phone="6666666666",
+            email="suspended@example.com",
+        )
+
+        CompanyMembership.objects.create(
+            user=cls.user,
+            company=invited_company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.INVITED,
+        )
+        CompanyMembership.objects.create(
+            user=cls.user,
+            company=suspended_company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.SUSPENDED,
+        )
+        CompanyMembership.objects.create(
+            user=cls.user,
+            company=cls.company_a,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.user,
+            company=cls.company_b,
+            role=CompanyMembership.Role.MANAGER,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.user,
+            company=cls.inactive_company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.other_user,
+            company=Company.objects.create(
+                name="Other Company",
+                phone="4444444444",
+                email="other-company@example.com",
+            ),
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_user_can_list_only_active_member_companies(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get("/api/companies/")
+
+        self.assertEqual(response.status_code, 200)
+
+        companies = (
+            response.data["results"]
+            if isinstance(response.data, dict) and "results" in response.data
+            else response.data
+        )
+        company_ids = {item["id"] for item in companies}
+
+        self.assertEqual(
+            company_ids,
+            {
+                str(self.company_a.id),
+                str(self.company_b.id),
+            },
+        )
+
+        company_names = [item["name"] for item in companies]
+        self.assertEqual(
+            company_names,
+            ["Alpha Services", "Beta Services"],
+        )
+
+    def test_unauthenticated_user_cannot_list_companies(self):
+        response = self.client.get("/api/companies/")
+
+        self.assertEqual(response.status_code, 401)
