@@ -12,6 +12,7 @@ from main.jobs.views import (
     CompanyPartStockAdjustmentView,
     CompanyServiceJobDetailView,
     CompanyServiceJobListCreateView,
+    CompanyServiceJobPartListCreateView,
     CompanyServiceJobStatusView,
     CompanyServiceJobNoteListCreateView,
 )
@@ -72,5 +73,10 @@ urlpatterns = [
         "companies/<uuid:company_id>/parts/<uuid:part_id>/adjust-stock/",
         CompanyPartStockAdjustmentView.as_view(),
         name="company-part-adjust-stock",
+    ),
+    path(
+        "companies/<uuid:company_id>/jobs/<uuid:job_id>/parts/",
+        CompanyServiceJobPartListCreateView.as_view(),
+        name="company-service-job-part-list-create",
     ),
 ]

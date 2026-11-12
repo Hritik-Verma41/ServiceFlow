@@ -13,9 +13,16 @@ from main.accounts.permissions import (
 )
 from main.companies.models import Company
 
-from .models import JobNote, Part, ServiceJob, StockMovement
+from .models import (
+    JobNote,
+    JobPart,
+    Part,
+    ServiceJob,
+    StockMovement,
+)
 from .serializers import (
     JobNoteSerializer,
+    JobPartSerializer,
     PartSerializer,
     ServiceJobSerializer,
     StockAdjustmentSerializer,
@@ -441,4 +448,117 @@ class CompanyPartStockAdjustmentView(APIView):
                 "created_at": movement.created_at,
             },
             status=status.HTTP_200_OK,
+        )
+
+class CompanyServiceJobPartListCreateView(generics.ListCreateAPIView):
+    serializer_class = JobPartSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_job(self):
+        company = self.get_company()
+
+        queryset = ServiceJob.objects.filter(company=company)
+
+        if not self.request.user.is_superuser:
+            membership = get_object_or_404(
+                CompanyMembership,
+                user=self.request.user,
+                company=company,
+                status=CompanyMembership.Status.ACTIVE,
+            )
+
+            if membership.role == CompanyMembership.Role.TECHNICIAN:
+                queryset = queryset.filter(
+                    assigned_technician=self.request.user,
+                )
+
+        return get_object_or_404(
+            queryset,
+            id=self.kwargs["job_id"],
+        )
+
+    def get_queryset(self):
+        return JobPart.objects.filter(
+            job=self.get_job(),
+        ).select_related(
+            "part",
+        ).order_by(
+            "created_at",
+        )
+
+    def create(self, request, *args, **kwargs):
+        job = self.get_job()
+
+        if job.status not in [
+            ServiceJob.Status.SCHEDULED,
+            ServiceJob.Status.IN_PROGRESS,
+        ]:
+            return Response(
+                {
+                    "detail": (
+                        "Parts can only be consumed by scheduled "
+                        "or in-progress jobs."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        quantity = serializer.validated_data["quantity"]
+        part = serializer.validated_data["part"]
+        notes = serializer.validated_data.get("notes", "")
+
+        with transaction.atomic():
+            part = get_object_or_404(
+                Part.objects.select_for_update(),
+                id=part.id,
+                company=job.company,
+                is_active=True,
+            )
+
+            previous_stock = part.stock_quantity
+
+            if previous_stock < quantity:
+                return Response(
+                    {"detail": "Insufficient stock for this part."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            resulting_stock = previous_stock - quantity
+
+            job_part = JobPart.objects.create(
+                job=job,
+                part=part,
+                quantity=quantity,
+                unit_price=part.unit_price,
+                notes=notes,
+            )
+
+            part.stock_quantity = resulting_stock
+            part.save(update_fields=["stock_quantity", "updated_at"])
+
+            StockMovement.objects.create(
+                part=part,
+                movement_type=StockMovement.MovementType.DECREASE,
+                quantity=quantity,
+                previous_stock=previous_stock,
+                resulting_stock=resulting_stock,
+                reason=f"Used on service job {job.id}",
+                created_by=request.user,
+            )
+
+        output_serializer = self.get_serializer(job_part)
+
+        return Response(
+            output_serializer.data,
+            status=status.HTTP_201_CREATED,
         )

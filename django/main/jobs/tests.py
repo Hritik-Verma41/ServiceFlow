@@ -24,6 +24,7 @@ from main.companies.models import (
 from main.jobs.models import (
     Invoice,
     JobNote,
+    JobPart,
     Part,
     Payment,
     ServiceJob,
@@ -2092,3 +2093,370 @@ class PartStockAdjustmentAPITests(TestCase):
 
         self.assertIn(response.status_code, (401, 403))
         self.assertEqual(StockMovement.objects.count(), 0)
+
+class JobPartAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Job Part Test Company",
+            phone="9000000050",
+            email="job-part-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Job Part Company",
+            phone="9000000051",
+            email="other-job-part-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Job Part Customer",
+            email="job-part-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Job Part Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "job-part-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "job-part-manager@example.com",
+            self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.technician = self.create_user(
+            "job-part-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_technician = self.create_user(
+            "other-job-part-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_admin = self.create_user(
+            "other-job-part-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=self.technician,
+            title="Job Part Test Job",
+            status=ServiceJob.Status.SCHEDULED,
+        )
+
+        self.part = Part.objects.create(
+            company=self.company,
+            name="Replacement Motor",
+            part_number="MTR-100",
+            unit_price=Decimal("1500.00"),
+            stock_quantity=Decimal("10.00"),
+            reorder_level=Decimal("2.00"),
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/"
+            f"jobs/{self.job.id}/parts/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def test_admin_can_list_job_parts(self):
+        self.client.force_authenticate(user=self.admin)
+
+        JobPart.objects.create(
+            job=self.job,
+            part=self.part,
+            quantity=Decimal("2.00"),
+            unit_price=Decimal("1500.00"),
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            response.data[0]["part_name"],
+            "Replacement Motor",
+        )
+
+    def test_admin_can_consume_part_for_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "2.00",
+                "notes": "Motor replaced during service.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("8.00"),
+        )
+
+        job_part = JobPart.objects.get(id=response.data["id"])
+        self.assertEqual(job_part.job, self.job)
+        self.assertEqual(job_part.part, self.part)
+        self.assertEqual(job_part.quantity, Decimal("2.00"))
+        self.assertEqual(job_part.unit_price, Decimal("1500.00"))
+        self.assertEqual(
+            job_part.notes,
+            "Motor replaced during service.",
+        )
+
+    def test_assigned_technician_can_consume_part(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("9.00"),
+        )
+
+    def test_consumption_creates_stock_movement_audit(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "3.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        movement = StockMovement.objects.get(part=self.part)
+
+        self.assertEqual(
+            movement.movement_type,
+            StockMovement.MovementType.DECREASE,
+        )
+        self.assertEqual(movement.quantity, Decimal("3.00"))
+        self.assertEqual(
+            movement.previous_stock,
+            Decimal("10.00"),
+        )
+        self.assertEqual(
+            movement.resulting_stock,
+            Decimal("7.00"),
+        )
+        self.assertEqual(movement.created_by, self.admin)
+        self.assertIn(str(self.job.id), movement.reason)
+
+    def test_insufficient_stock_is_rejected_without_changes(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "15.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.part.refresh_from_db()
+        self.assertEqual(
+            self.part.stock_quantity,
+            Decimal("10.00"),
+        )
+        self.assertEqual(JobPart.objects.count(), 0)
+        self.assertEqual(StockMovement.objects.count(), 0)
+
+    def test_technician_cannot_access_another_technicians_job(self):
+        self.client.force_authenticate(user=self.other_technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_company_member_cannot_access_job_parts(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_part_from_another_company_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        other_part = Part.objects.create(
+            company=self.other_company,
+            name="Other Company Motor",
+            unit_price=Decimal("500.00"),
+            stock_quantity=Decimal("5.00"),
+        )
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(other_part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobPart.objects.count(), 0)
+
+    def test_inactive_part_cannot_be_consumed(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.part.is_active = False
+        self.part.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobPart.objects.count(), 0)
+
+    def test_new_job_cannot_consume_parts(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.job.status = ServiceJob.Status.NEW
+        self.job.save(update_fields=["status"])
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobPart.objects.count(), 0)
+
+    def test_completed_job_cannot_consume_parts(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.job.status = ServiceJob.Status.COMPLETED
+        self.job.save(update_fields=["status"])
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobPart.objects.count(), 0)
+
+    def test_zero_quantity_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "0.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(JobPart.objects.count(), 0)
+
+    def test_client_cannot_override_job_or_unit_price(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+                "part": str(self.part.id),
+                "quantity": "1.00",
+                "unit_price": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        job_part = JobPart.objects.get(id=response.data["id"])
+        self.assertEqual(job_part.job, self.job)
+        self.assertEqual(
+            job_part.unit_price,
+            Decimal("1500.00"),
+        )
+
+    def test_unauthenticated_user_cannot_consume_parts(self):
+        response = self.client.post(
+            self.url,
+            {
+                "part": str(self.part.id),
+                "quantity": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (401, 403))
+        self.assertEqual(JobPart.objects.count(), 0)

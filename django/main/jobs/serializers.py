@@ -6,7 +6,7 @@ from rest_framework import serializers
 from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
 
-from .models import JobNote, Part, ServiceJob, StockMovement
+from .models import JobNote, JobPart, Part, ServiceJob
 
 class ServiceJobSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
@@ -178,3 +178,50 @@ class StockAdjustmentSerializer(serializers.Serializer):
         max_length=255,
         trim_whitespace=True,
     )
+
+class JobPartSerializer(serializers.ModelSerializer):
+    part = serializers.PrimaryKeyRelatedField(
+        queryset=Part.objects.none(),
+    )
+
+    part_name = serializers.CharField(
+        source="part.name",
+        read_only=True,
+    )
+
+    quantity = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+
+    class Meta:
+        model = JobPart
+        fields = [
+            "id",
+            "job",
+            "part",
+            "part_name",
+            "quantity",
+            "unit_price",
+            "notes",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "job",
+            "unit_price",
+            "created_at",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        view = self.context.get("view")
+        company = view.get_company() if view else None
+
+        if company:
+            self.fields["part"].queryset = Part.objects.filter(
+                company=company,
+                is_active=True,
+            )
