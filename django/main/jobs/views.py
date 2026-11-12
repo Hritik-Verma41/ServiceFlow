@@ -26,6 +26,7 @@ from .models import (
 from .serializers import (
     InvoiceCreateSerializer,
     InvoiceSerializer,
+    InvoiceUpdateSerializer,
     JobNoteSerializer,
     JobPartSerializer,
     PartSerializer,
@@ -646,3 +647,75 @@ class CompanyInvoiceListCreateView(generics.ListCreateAPIView):
             response_serializer.data,
             status=status.HTTP_201_CREATED,
         )
+
+class CompanyInvoiceDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+    lookup_url_kwarg = "invoice_id"
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_queryset(self):
+        queryset = Invoice.objects.filter(
+            company = self.get_company(),
+        ).select_related(
+            "customer",
+            "job",
+        ).prefetch_related(
+            "items",
+        )
+
+        if self.request.method in ["PUT", "PATCH"]:
+            queryset = queryset.select_for_update()
+
+        return queryset
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return InvoiceUpdateSerializer
+
+        return InvoiceSerializer
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        invoice = self.get_object()
+
+        if invoice.status != Invoice.Status.DRAFT:
+            return Response(
+                {"detail": "Only draft invoices can be updated."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(
+            invoice,
+            data=request.data,
+            partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        invoice = serializer.save()
+
+        # Recalculate totals if the discount was changed.
+        invoice.calculate_totals()
+        invoice.save(
+            update_fields=[
+                "subtotal",
+                "tax_amount",
+                "total_amount",
+                "updated_at",
+            ]
+        )
+
+        response_serializer = InvoiceSerializer(
+            invoice,
+            context=self.get_serializer_context(),
+        )
+
+        return Response(response_serializer.data)

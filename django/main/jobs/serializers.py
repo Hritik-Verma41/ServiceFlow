@@ -235,7 +235,7 @@ class JobPartSerializer(serializers.ModelSerializer):
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
     class Meta:
-        models = InvoiceItem
+        model = InvoiceItem
         fields = [
             "id",
             "item_type",
@@ -243,7 +243,7 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
             "quantity",
             "unit_price",
             "amount",
-            "created_by",
+            "created_at",
         ]
         read_only_fields = [
             "id",
@@ -330,3 +330,19 @@ class InvoiceCreateSerializer(serializers.ModelSerializer):
             )
 
         return job
+
+class InvoiceUpdateSerializer(serializers.ModelSerializer):
+    discount_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+    )
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "due_date",
+            "discount_amount",
+            "notes",
+        ]

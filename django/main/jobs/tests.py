@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from threading import Barrier
@@ -23,6 +24,7 @@ from main.companies.models import (
 )
 from main.jobs.models import (
     Invoice,
+    InvoiceItem,
     JobNote,
     JobPart,
     Part,
@@ -2716,3 +2718,165 @@ class InvoiceAPITests(TestCase):
             response.data[0]["invoice_number"],
             "INV-LIST-TEST",
         )
+
+    def test_invoice_list_includes_serialized_items(self):
+        self.client.force_authenticate(user=self.admin)
+
+        invoice = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            job=self.job,
+            invoice_number="INV-ITEM-TEST",
+        )
+
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            item_type=InvoiceItem.ItemType.LABOR,
+            description="Repair labor",
+            quantity=Decimal("2.00"),
+            unit_price=Decimal("500.00"),
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+        items = response.data[0]["items"]
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["description"], "Repair labor")
+        self.assertEqual(items[0]["quantity"], "2.00")
+        self.assertEqual(items[0]["unit_price"], "500.00")
+        self.assertEqual(items[0]["amount"], "1000.00")
+        self.assertIn("created_at", items[0])
+
+    def create_invoice(self, status=Invoice.Status.DRAFT):
+        return Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            job=self.job,
+            invoice_number=f"INV-DETAIL-{uuid.uuid4().hex[:8]}",
+            status=status,
+        )
+
+    def test_admin_can_retrieve_invoice_detail(self):
+        invoice = self.create_invoice()
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            f"{self.url}{invoice.id}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(invoice.id))
+        self.assertEqual(
+            response.data["invoice_number"],
+            invoice.invoice_number,
+        )
+
+    def test_manager_can_retrieve_invoice_detail(self):
+        invoice = self.create_invoice()
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.get(
+            f"{self.url}{invoice.id}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_can_update_draft_invoice(self):
+        invoice = self.create_invoice()
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{invoice.id}/",
+            {
+                "due_date": "2026-12-15",
+                "notes": "Updated invoice notes",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        invoice.refresh_from_db()
+        self.assertEqual(str(invoice.due_date), "2026-12-15")
+        self.assertEqual(invoice.notes, "Updated invoice notes")
+
+    def test_updating_discount_recalculates_invoice_totals(self):
+        invoice = self.create_invoice()
+
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            item_type=InvoiceItem.ItemType.LABOR,
+            description="Repair labor",
+            quantity=Decimal("2.00"),
+            unit_price=Decimal("500.00"),
+        )
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{invoice.id}/",
+            {"discount_amount": "100.00"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.subtotal, Decimal("1000.00"))
+        self.assertEqual(invoice.discount_amount, Decimal("100.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("162.00"))
+        self.assertEqual(invoice.total_amount, Decimal("1062.00"))
+
+    def test_non_draft_invoice_cannot_be_updated(self):
+        invoice = self.create_invoice(status=Invoice.Status.ISSUED)
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{invoice.id}/",
+            {"notes": "Attempted update"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        invoice.refresh_from_db()
+        self.assertNotEqual(invoice.notes, "Attempted update")
+
+    def test_other_company_admin_cannot_retrieve_invoice(self):
+        invoice = self.create_invoice()
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(
+            f"{self.url}{invoice.id}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_technician_cannot_retrieve_invoice(self):
+        invoice = self.create_invoice()
+
+        technician = self.create_user(
+            "invoice-detail-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+        self.client.force_authenticate(user=technician)
+
+        response = self.client.get(
+            f"{self.url}{invoice.id}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_user_cannot_retrieve_invoice(self):
+        invoice = self.create_invoice()
+
+        response = self.client.get(
+            f"{self.url}{invoice.id}/"
+        )
+
+        self.assertIn(response.status_code, (401, 403))
