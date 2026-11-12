@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    CompanyCreateView,
     CompanyCustomerAddressDetailView,
     CompanyCustomerAddressListCreateView,
     CompanyCustomerDetailView,
@@ -9,6 +10,11 @@ from .views import (
 
 
 urlpatterns = [
+    path(
+        "companies/",
+        CompanyCreateView.as_view(),
+        name="company-create",
+    ),
     path(
         "companies/<uuid:company_id>/customers/",
         CompanyCustomerListCreateView.as_view(),

@@ -1,7 +1,31 @@
 from rest_framework import serializers
 
-from .models import Customer, CustomerAddress
+from .models import Company, Customer, CustomerAddress
 
+
+class CompanyCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Company
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "email",
+            "address",
+            "city",
+            "state",
+            "country",
+            "gst_number",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
 
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:

@@ -1,15 +1,36 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from main.accounts.models import CompanyMembership
 from main.accounts.permissions import (
     IsActiveCompanyMember,
     IsCompanyAdminOrManager,
 )
 from .models import Company, Customer, CustomerAddress
-from .serializers import CustomerAddressSerializer, CustomerSerializer
+from .serializers import (
+    CompanyCreateSerializer,
+    CustomerAddressSerializer,
+    CustomerSerializer,
+)
+
+class CompanyCreateView(generics.CreateAPIView):
+    serializer_class = CompanyCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        company = serializer.save()
+
+        CompanyMembership.objects.create(
+            user=self.request.user,
+            company=company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
 
 class CompanyCustomerListCreateView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer

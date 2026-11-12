@@ -432,3 +432,65 @@ class CompanyCustomerAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+class CompanyCreateAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="creator@example.com",
+            password="TestPassword123!",
+        )
+
+    def test_authenticated_user_can_create_company(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            "/api/companies/",
+            {
+                "name": "ServiceFlow Technologies",
+                "phone": "9876543210",
+                "email": "contact@serviceflow.example",
+                "city": "Pune",
+                "state": "Maharashtra",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        company = Company.objects.get(id=response.data["id"])
+
+        self.assertEqual(company.name, "ServiceFlow Technologies")
+        self.assertTrue(company.is_active)
+
+        membership = CompanyMembership.objects.get(
+            user=self.user,
+            company=company,
+        )
+
+        self.assertEqual(
+            membership.role,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+        self.assertEqual(
+            membership.status,
+            CompanyMembership.Status.ACTIVE,
+        )
+
+    def test_unauthenticated_user_cannot_create_company(self):
+        response = self.client.post(
+            "/api/companies/",
+            {
+                "name": "Unauthorized Company",
+                "phone": "9876543210",
+                "email": "unauthorized@example.com",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(
+            Company.objects.filter(
+                name="Unauthorized Company"
+            ).exists()
+        )
