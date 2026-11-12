@@ -6,7 +6,14 @@ from rest_framework import serializers
 from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
 
-from .models import JobNote, JobPart, Part, ServiceJob
+from .models import (
+    Invoice,
+    InvoiceItem,
+    JobNote,
+    JobPart,
+    Part,
+    ServiceJob,
+)
 
 class ServiceJobSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
@@ -225,3 +232,101 @@ class JobPartSerializer(serializers.ModelSerializer):
                 company=company,
                 is_active=True,
             )
+
+class InvoiceItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        models = InvoiceItem
+        fields = [
+            "id",
+            "item_type",
+            "description",
+            "quantity",
+            "unit_price",
+            "amount",
+            "created_by",
+        ]
+        read_only_fields = [
+            "id",
+            "amount",
+            "created_at",
+        ]
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    items = InvoiceItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "company",
+            "customer",
+            "job",
+            "invoice_number",
+            "status",
+            "issue_date",
+            "due_date",
+            "subtotal",
+            "tax_amount",
+            "discount_amount",
+            "total_amount",
+            "notes",
+            "items",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "company",
+            "customer",
+            "job",
+            "invoice_number",
+            "status",
+            "issue_date",
+            "subtotal",
+            "tax_amount",
+            "total_amount",
+            "created_at",
+            "updated_at",
+        ]
+
+class InvoiceCreateSerializer(serializers.ModelSerializer):
+    job = serializers.PrimaryKeyRelatedField(
+        queryset=ServiceJob.objects.none(),
+    )
+
+    discount_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+        default=Decimal("0.00"),
+    )
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "job",
+            "due_date",
+            "discount_amount",
+            "notes",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        view = self.context.get("view")
+        company = view.get_company() if view else None
+
+        if company:
+            self.fields["job"].queryset = ServiceJob.objects.filter(
+                company=company,
+                status=ServiceJob.Status.COMPLETED,
+            )
+
+    def validate_job(self, job):
+        if Invoice.objects.filter(job=job).exists():
+            raise serializers.ValidationError(
+                "An invoice already exists for this job."
+            )
+
+        return job

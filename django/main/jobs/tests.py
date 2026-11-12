@@ -2460,3 +2460,259 @@ class JobPartAPITests(TestCase):
 
         self.assertIn(response.status_code, (401, 403))
         self.assertEqual(JobPart.objects.count(), 0)
+
+class InvoiceAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Invoice Test Company",
+            phone="9000000060",
+            email="invoice-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Invoice Company",
+            phone="9000000061",
+            email="other-invoice-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Invoice Test Customer",
+            email="invoice-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Invoice Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "invoice-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "invoice-manager@example.com",
+            self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.other_admin = self.create_user(
+            "other-invoice-admin@example.com",
+            self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            title="Completed Invoice Job",
+            status=ServiceJob.Status.COMPLETED,
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/invoices/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def test_admin_can_create_draft_invoice_for_completed_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+                "due_date": "2026-12-01",
+                "discount_amount": "50.00",
+                "notes": "Invoice for completed service.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        invoice = Invoice.objects.get(job=self.job)
+
+        self.assertEqual(invoice.company, self.company)
+        self.assertEqual(invoice.customer, self.customer)
+        self.assertEqual(invoice.job, self.job)
+        self.assertEqual(invoice.status, Invoice.Status.DRAFT)
+        self.assertTrue(invoice.invoice_number.startswith("INV-"))
+        self.assertEqual(
+            invoice.discount_amount,
+            Decimal("50.00"),
+        )
+        self.assertEqual(invoice.total_amount, Decimal("0.00"))
+
+    def test_manager_can_create_invoice(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            Invoice.objects.filter(job=self.job).exists()
+        )
+
+    def test_invoice_cannot_be_created_for_incomplete_job(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.job.status = ServiceJob.Status.IN_PROGRESS
+        self.job.save(update_fields=["status"])
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            Invoice.objects.filter(job=self.job).exists()
+        )
+
+    def test_duplicate_invoice_for_job_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            job=self.job,
+            invoice_number="INV-EXISTING-TEST",
+        )
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Invoice.objects.filter(job=self.job).count(), 1)
+
+    def test_client_cannot_override_invoice_fields(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+                "company": str(self.other_company.id),
+                "customer": str(self.customer.id),
+                "invoice_number": "CUSTOM-INVOICE-001",
+                "status": "PAID",
+                "total_amount": "1.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        invoice = Invoice.objects.get(job=self.job)
+
+        self.assertEqual(invoice.company, self.company)
+        self.assertEqual(invoice.customer, self.customer)
+        self.assertEqual(invoice.status, Invoice.Status.DRAFT)
+        self.assertNotEqual(
+            invoice.invoice_number,
+            "CUSTOM-INVOICE-001",
+        )
+
+    def test_other_company_admin_cannot_create_invoice(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_technician_cannot_create_invoice(self):
+        technician = self.create_user(
+            "invoice-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+        self.client.force_authenticate(user=technician)
+
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_unauthenticated_user_cannot_create_invoice(self):
+        response = self.client.post(
+            self.url,
+            {
+                "job": str(self.job.id),
+            },
+            format="json",
+        )
+
+        self.assertIn(response.status_code, (401, 403))
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_admin_can_list_company_invoices(self):
+        self.client.force_authenticate(user=self.admin)
+
+        Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            job=self.job,
+            invoice_number="INV-LIST-TEST",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            response.data[0]["invoice_number"],
+            "INV-LIST-TEST",
+        )

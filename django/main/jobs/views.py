@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -14,6 +16,7 @@ from main.accounts.permissions import (
 from main.companies.models import Company
 
 from .models import (
+    Invoice,
     JobNote,
     JobPart,
     Part,
@@ -21,6 +24,8 @@ from .models import (
     StockMovement,
 )
 from .serializers import (
+    InvoiceCreateSerializer,
+    InvoiceSerializer,
     JobNoteSerializer,
     JobPartSerializer,
     PartSerializer,
@@ -560,5 +565,84 @@ class CompanyServiceJobPartListCreateView(generics.ListCreateAPIView):
 
         return Response(
             output_serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
+
+class CompanyInvoiceListCreateView(generics.ListCreateAPIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return InvoiceCreateSerializer
+
+        return InvoiceSerializer
+
+    def get_queryset(self):
+        return Invoice.objects.filter(
+            company=self.get_company(),
+        ).select_related(
+            "customer",
+            "job",
+        ).prefetch_related(
+            "items",
+        ).order_by(
+            "-created_at"
+        )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        job = serializer.validated_data["job"]
+
+        with transaction.atomic():
+            # Lock the job to prevent concurrent invoice creation.
+            job = get_object_or_404(
+                ServiceJob.objects.select_for_update(),
+                id=job.id,
+                company=self.get_company(),
+                status=ServiceJob.Status.COMPLETED,
+            )
+
+            if Invoice.objects.filter(job=job).exists():
+                return Response(
+                    {
+                        "detail": (
+                            "An invoice already exists for this job."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            invoice_number = (
+                f"INV-{timezone.localdate():%Y%m%d}-"
+                f"{uuid.uuid4().hex[:8].upper()}"
+            )
+
+            invoice = serializer.save(
+                company=job.company,
+                customer=job.customer,
+                job=job,
+                invoice_number=invoice_number,
+                status=Invoice.Status.DRAFT,
+            )
+
+        response_serializer = InvoiceSerializer(
+            invoice,
+            context=self.get_serializer_context()
+        )
+
+        return Response(
+            response_serializer.data,
             status=status.HTTP_201_CREATED,
         )
