@@ -8,11 +8,13 @@ from rest_framework import status
 from main.accounts.models import CompanyMembership
 from main.accounts.permissions import (
     IsActiveCompanyMember,
+    IsCompanyAdmin,
     IsCompanyAdminOrManager,
 )
 from .models import Company, Customer, CustomerAddress
 from .serializers import (
     CompanyCreateSerializer,
+    CompanyUpdateSerializer,
     CustomerAddressSerializer,
     CustomerSerializer,
 )
@@ -38,6 +40,46 @@ class CompanyListCreateView(generics.ListCreateAPIView):
             role=CompanyMembership.Role.COMPANY_ADMIN,
             status=CompanyMembership.Status.ACTIVE,
         )
+
+class CompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+    lookup_url_kwarg = "company_id"
+
+    def get_permissions(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            permission_classes = [
+                IsAuthenticated,
+                IsCompanyAdminOrManager,
+            ]
+        elif self.request.method == "DELETE":
+            permission_classes = [
+                IsAuthenticated,
+                IsCompanyAdmin,
+            ]
+        else:
+            permission_classes = self.permission_classes
+
+        return [permission() for permission in permission_classes]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_queryset(self):
+        return Company.objects.filter(is_active=True)
+
+    def get_serializer_class(self):
+        if self.request.method in ["PUT", "PATCH"]:
+            return CompanyUpdateSerializer
+
+        return CompanyCreateSerializer
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=["is_active", "updated_at"])
 
 class CompanyCustomerListCreateView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer

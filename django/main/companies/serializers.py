@@ -27,6 +27,20 @@ class CompanyCreateSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+class CompanyUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Company
+        fields = [
+            "name",
+            "phone",
+            "email",
+            "address",
+            "city",
+            "state",
+            "country",
+            "gst_number",
+        ]
+
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer

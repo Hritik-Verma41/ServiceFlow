@@ -64,3 +64,31 @@ class IsCompanyAdminOrManager(IsActiveCompanyMember):
                 CompanyMembership.Role.MANAGER,
             ],
         ).exists()
+
+class IsCompanyAdmin(IsActiveCompanyMember):
+    """
+    Require an active company membership with the company admin role.
+    """
+
+    message = "Only company admins can perform this action."
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_superuser:
+            return True
+
+        if not super().has_permission(request, view):
+            return False
+
+        company = view.get_company()
+
+        return CompanyMembership.objects.filter(
+            user=user,
+            company=company,
+            status=CompanyMembership.Status.ACTIVE,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+        ).exists()

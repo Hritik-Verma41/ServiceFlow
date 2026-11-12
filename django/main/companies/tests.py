@@ -610,3 +610,180 @@ class CompanyListAPITests(TestCase):
         response = self.client.get("/api/companies/")
 
         self.assertEqual(response.status_code, 401)
+
+class CompanyDetailAPITests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_user(
+            email="detail-admin@example.com",
+            password="TestPassword123!",
+        )
+        cls.manager = User.objects.create_user(
+            email="detail-manager@example.com",
+            password="TestPassword123!",
+        )
+        cls.technician = User.objects.create_user(
+            email="detail-technician@example.com",
+            password="TestPassword123!",
+        )
+        cls.other_user = User.objects.create_user(
+            email="detail-other@example.com",
+            password="TestPassword123!",
+        )
+
+        cls.company = Company.objects.create(
+            name="Detail Test Company",
+            phone="9876543210",
+            email="detail@example.com",
+        )
+
+        cls.other_company = Company.objects.create(
+            name="Other Detail Company",
+            phone="1234567890",
+            email="other-detail@example.com",
+        )
+
+        cls.inactive_company = Company.objects.create(
+            name="Inactive Detail Company",
+            phone="1111111111",
+            email="inactive-detail@example.com",
+            is_active=False,
+        )
+
+        CompanyMembership.objects.create(
+            user=cls.admin,
+            company=cls.company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.manager,
+            company=cls.company,
+            role=CompanyMembership.Role.MANAGER,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.technician,
+            company=cls.company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        CompanyMembership.objects.create(
+            user=cls.other_user,
+            company=cls.other_company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = f"/api/companies/{self.company.id}/"
+
+    def test_active_company_member_can_retrieve_company(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["name"], self.company.name)
+        self.assertEqual(response.data["id"], str(self.company.id))
+
+    def test_company_admin_can_update_company(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.url,
+            {"name": "Updated ServiceFlow Company"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.company.refresh_from_db()
+        self.assertEqual(
+            self.company.name,
+            "Updated ServiceFlow Company",
+        )
+
+    def test_company_manager_can_update_company(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.patch(
+            self.url,
+            {"city": "Pune"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.city, "Pune")
+
+    def test_technician_cannot_update_company(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            self.url,
+            {"name": "Unauthorized Update"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_company_admin_can_deactivate_company(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(self.url)
+
+        self.assertEqual(response.status_code, 204)
+
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.is_active)
+
+    def test_company_manager_cannot_deactivate_company(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.delete(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.is_active)
+
+    def test_other_company_member_cannot_retrieve_company(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_inactive_company_cannot_be_retrieved(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            f"/api/companies/{self.inactive_company.id}/"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_unauthenticated_user_cannot_retrieve_company(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_update_cannot_change_company_active_status(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.url,
+            {
+                "name": "Still Active",
+                "is_active": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.is_active)
