@@ -1,24 +1,11 @@
 import { AuthGuard } from "./components/auth-guard";
 import { DashboardStats } from "./components/dashboard-stats";
 import Image from "next/image";
+import { JobStatusBreakdown } from "./components/job-status-breakdown";
 import { LogoutButton } from "./components/logout-button";
 import { MobileNavigation } from "./components/mobile-navigation";
 import { RecentServiceJobs } from "./components/recent-service-jobs";
 import { ThemeToggle } from "./components/theme-toggle";
-
-const stats = [
-  { label: "Total Jobs", value: "248", change: "+12.5%", icon: "▤" },
-  { label: "Active Jobs", value: "42", change: "+8.2%", icon: "◷" },
-  { label: "Technicians", value: "18", change: "+2 this month", icon: "♙" },
-  { label: "Revenue", value: "₹4,82,500", change: "+15.3%", icon: "₹" },
-];
-
-const jobs = [
-  { id: "JOB-1024", customer: "Acme Industries", service: "AC Maintenance", technician: "Rahul Sharma", date: "13 Nov 2026", status: "In Progress" },
-  { id: "JOB-1023", customer: "Bright Solutions", service: "Electrical Repair", technician: "Amit Kumar", date: "13 Nov 2026", status: "Scheduled" },
-  { id: "JOB-1022", customer: "Nova Healthcare", service: "Equipment Inspection", technician: "Priya Singh", date: "12 Nov 2026", status: "Completed" },
-  { id: "JOB-1021", customer: "Urban Spaces", service: "Plumbing Repair", technician: "Vikash Gupta", date: "12 Nov 2026", status: "Completed" },
-];
 
 const navigation = [
   { icon: "⌂", label: "Overview" },
@@ -150,6 +137,9 @@ export default function Home() {
 
             {/* Dashboard Statistics */}
             <DashboardStats />
+
+            {/* Job Status Breakdown */}
+            <JobStatusBreakdown />
 
             {/* Recent Service Jobs */}
             <RecentServiceJobs />
