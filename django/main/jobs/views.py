@@ -872,6 +872,87 @@ class CompanyCollectedRevenueView(APIView):
             "currency": "INR",
         })
 
+class CompanyRevenueTrendView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get(self, request, *args, **kwargs):
+        from django.db.models import (
+            Sum,
+            F,
+            DecimalField,
+            Value,
+        )
+        from django.db.models.functions import (
+            Greatest,
+            TruncDate,
+        )
+
+        company = self.get_company()
+
+        payments = Payment.objects.filter(
+            invoice__company=company,
+            status__in=[
+                Payment.Status.SUCCESS,
+                Payment.Status.PARTIALLY_REFUNDED,
+                Payment.Status.REFUNDED,
+            ],
+            paid_at__isnull=False,
+        )
+
+        payments = filter_queryset_by_date_range(
+            payments,
+            request,
+            "paid_at",
+        )
+
+        daily_revenue = (
+            payments
+            .annotate(
+                day=TruncDate(
+                    "paid_at",
+                    tzinfo=timezone.get_current_timezone(),
+                )
+            )
+            .values("day")
+            .annotate(
+                total=Sum(
+                    Greatest(
+                        F("amount") - F("refunded_amount"),
+                        Value(Decimal("0.00")),
+                        output_field=DecimalField(
+                            max_digits=12,
+                            decimal_places=2,
+                        ),
+                    )
+                )
+            )
+            .order_by("day")
+        )
+
+        return Response({
+            "company_id": str(company.id),
+            "currency": "INR",
+            "results": [
+                {
+                    "date": item["day"].isoformat(),
+                    "revenue": str(
+                        item["total"] or Decimal("0.00")
+                    ),
+                }
+                for item in daily_revenue
+            ],
+        })
+
 class CompanyInvoiceDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [
         IsAuthenticated,

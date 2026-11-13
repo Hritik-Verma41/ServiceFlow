@@ -3045,3 +3045,366 @@ class InvoiceAPITests(TestCase):
                 item_type=InvoiceItem.ItemType.LABOR,
             ).exists()
         )
+
+class CompanyRevenueTrendAPITests(TestCase):
+    def setUp(self):
+        from datetime import datetime
+
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Revenue Trend Test Company",
+            phone="9000000070",
+            email="revenue-trend-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Revenue Company",
+            phone="9000000071",
+            email="other-revenue-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Revenue Test Customer",
+            email="revenue-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Revenue Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "revenue-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "revenue-manager@example.com",
+            self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.technician = self.create_user(
+            "revenue-technician@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_customer = Customer.objects.create(
+            company=self.other_company,
+            name="Other Revenue Customer",
+            email="other-revenue-customer@example.com",
+        )
+
+        self.other_address = CustomerAddress.objects.create(
+            customer=self.other_customer,
+            label="Primary",
+            address_line_1="456 Other Street",
+            city="Mumbai",
+            state="Maharashtra",
+            postal_code="400001",
+            country="India",
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/revenue/trend/"
+        )
+
+        self.other_company_url = (
+            f"/api/companies/{self.other_company.id}/revenue/trend/"
+        )
+
+        self.payment_date_1 = timezone.make_aware(
+            datetime(2026, 11, 10, 10, 0, 0),
+            timezone.get_current_timezone(),
+        )
+
+        self.payment_date_2 = timezone.make_aware(
+            datetime(2026, 11, 11, 12, 0, 0),
+            timezone.get_current_timezone(),
+        )
+
+        self.payment_date_3 = timezone.make_aware(
+            datetime(2026, 11, 12, 14, 0, 0),
+            timezone.get_current_timezone(),
+        )
+
+        # Successful payment: ₹1,000.
+        self.create_payment(
+            company=self.company,
+            customer=self.customer,
+            address=self.address,
+            invoice_number="REV-TREND-001",
+            amount="1000.00",
+            status=Payment.Status.SUCCESS,
+            paid_at=self.payment_date_1,
+        )
+
+        # Partially refunded payment: ₹500 - ₹100 = ₹400.
+        self.create_payment(
+            company=self.company,
+            customer=self.customer,
+            address=self.address,
+            invoice_number="REV-TREND-002",
+            amount="500.00",
+            refunded_amount="100.00",
+            status=Payment.Status.PARTIALLY_REFUNDED,
+            paid_at=self.payment_date_1,
+        )
+
+        # Fully refunded payment: ₹300 - ₹300 = ₹0.
+        self.create_payment(
+            company=self.company,
+            customer=self.customer,
+            address=self.address,
+            invoice_number="REV-TREND-003",
+            amount="300.00",
+            refunded_amount="300.00",
+            status=Payment.Status.REFUNDED,
+            paid_at=self.payment_date_2,
+        )
+
+        # Pending payments must not contribute to revenue.
+        self.create_payment(
+            company=self.company,
+            customer=self.customer,
+            address=self.address,
+            invoice_number="REV-TREND-004",
+            amount="900.00",
+            status=Payment.Status.PENDING,
+            paid_at=self.payment_date_3,
+        )
+
+        # Failed payments must not contribute to revenue.
+        self.create_payment(
+            company=self.company,
+            customer=self.customer,
+            address=self.address,
+            invoice_number="REV-TREND-005",
+            amount="700.00",
+            status=Payment.Status.FAILED,
+            paid_at=self.payment_date_3,
+        )
+
+        # Another company's payment must never appear in this company's data.
+        self.create_payment(
+            company=self.other_company,
+            customer=self.other_customer,
+            address=self.other_address,
+            invoice_number="REV-TREND-006",
+            amount="5000.00",
+            status=Payment.Status.SUCCESS,
+            paid_at=self.payment_date_1,
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def create_payment(
+        self,
+        company,
+        customer,
+        address,
+        invoice_number,
+        amount,
+        status,
+        paid_at,
+        refunded_amount="0.00",
+    ):
+        job = ServiceJob.objects.create(
+            company=company,
+            customer=customer,
+            service_address=address,
+            title=f"Revenue Test Job {invoice_number}",
+            status=ServiceJob.Status.COMPLETED,
+        )
+
+        invoice = Invoice.objects.create(
+            company=company,
+            customer=customer,
+            job=job,
+            invoice_number=invoice_number,
+            status=Invoice.Status.PAID,
+            total_amount=Decimal(amount),
+        )
+
+        return Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal(amount),
+            refunded_amount=Decimal(refunded_amount),
+            method=Payment.Method.CASH,
+            status=status,
+            paid_at=paid_at,
+        )
+
+    def test_admin_can_view_daily_revenue_trend(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["company_id"],
+            str(self.company.id),
+        )
+        self.assertEqual(response.data["currency"], "INR")
+
+        self.assertEqual(
+            response.data["results"],
+            [
+                {
+                    "date": "2026-11-10",
+                    "revenue": "1400.00",
+                },
+                {
+                    "date": "2026-11-11",
+                    "revenue": "0.00",
+                },
+            ],
+        )
+
+    def test_manager_can_view_revenue_trend(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_technician_cannot_view_revenue_trend(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_date_range_filters_revenue_trend(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-11",
+                "end_date": "2026-11-11",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(
+            response.data["results"],
+            [
+                {
+                    "date": "2026-11-11",
+                    "revenue": "0.00",
+                },
+            ],
+        )
+
+    def test_revenue_trend_does_not_include_other_companies(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        total_revenue = sum(
+            Decimal(item["revenue"])
+            for item in response.data["results"]
+        )
+
+        self.assertEqual(total_revenue, Decimal("1400.00"))
+
+    def test_revenue_trend_requires_both_date_parameters(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_revenue_trend_rejects_invalid_date_format(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "10-11-2026",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_revenue_trend_rejects_start_date_after_end_date(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-12",
+                "end_date": "2026-11-10",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_unauthenticated_user_cannot_view_revenue_trend(self):
+        response = self.client.get(
+            self.url,
+            {
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-12",
+            },
+        )
+
+        self.assertEqual(response.status_code, 401)
