@@ -2,6 +2,7 @@
 
 import { useEffect, useState, ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { CurrentUserProvider } from "./current-user-provider";
 
 interface AuthGuardProps {
     children: ReactNode;
@@ -120,5 +121,9 @@ export function AuthGuard({ children }: AuthGuardProps) {
         );
     }
 
-    return <>{children}</>
+    return (
+        <CurrentUserProvider>
+            {children}
+        </CurrentUserProvider>
+    );
 }

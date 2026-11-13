@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { useCurrentUser } from "./current-user-provider";
 
 const navigation = [
   { icon: "⌂", label: "Overview", href: "/" },
@@ -14,6 +15,33 @@ const navigation = [
 
 export function MobileNavigation() {
   const [open, setOpen] = useState(false);
+  const { user, loading } = useCurrentUser();
+
+  const displayName =
+    user?.full_name?.trim() ||
+    user?.email?.split("@")[0] ||
+    "User";
+
+  const initials =
+    displayName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0].toUpperCase())
+      .join("") || "U";
+
+  const membership = user?.memberships?.[0];
+
+  const displayRole = membership?.role
+    ? membership.role
+        .toLowerCase()
+        .split("_")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ")
+    : "Team Member";
+
+  const profileSubtitle =
+    membership?.company_name || displayRole;
 
   return (
     <div className="md:hidden">
@@ -97,15 +125,21 @@ export function MobileNavigation() {
               </nav>
             </div>
 
-            {/* Profile */}
+            {/* Dynamic User Profile */}
             <div className="border-t border-white/10 p-5">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 font-semibold">
-                  HV
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700 font-semibold">
+                  {loading ? "..." : initials}
                 </div>
-                <div>
-                  <p className="text-sm font-medium">Admin User</p>
-                  <p className="text-xs text-slate-400">Company Admin</p>
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {loading ? "Loading..." : displayName}
+                  </p>
+
+                  <p className="truncate text-xs text-slate-400">
+                    {loading ? " " : profileSubtitle}
+                  </p>
                 </div>
               </div>
             </div>

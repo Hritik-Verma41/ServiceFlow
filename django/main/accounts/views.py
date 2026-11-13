@@ -43,6 +43,39 @@ logger = logging.getLogger(__name__)
 class InvitationEmailDeliveryError(Exception):
     """Raised when an invitation email cannot be delivered."""
 
+class CurrentUserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        memberships = (
+            CompanyMembership.objects
+            .filter(
+                user=user,
+                status=CompanyMembership.Status.ACTIVE,
+                company__is_active=True,
+            )
+            .select_related("company")
+        )
+
+        return Response({
+            "id": str(user.id),
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name().strip(),
+            "email": user.email,
+            "phone": user.phone,
+            "memberships": [
+                {
+                    "company_id": str(membership.company.id),
+                    "company_name": membership.company.name,
+                    "role": membership.role,
+                    "status": membership.status,
+                }
+                for membership in memberships
+            ],
+        })
 
 class CompanyInvitationCreateView(APIView):
     permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]

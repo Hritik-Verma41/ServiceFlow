@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    CurrentUserProfileView,
     CompanyInvitationCreateView,
     CompanyInvitationResendView,
     CompanyInvitationRevokeView,
@@ -12,6 +13,11 @@ from .views import (
 
 
 urlpatterns = [
+    path(
+        "accounts/me/",
+        CurrentUserProfileView.as_view(),
+        name="current-user-profile",
+    ),
     path(
         "accounts/companies/<uuid:company_id>/invitations/",
         CompanyInvitationCreateView.as_view(),
