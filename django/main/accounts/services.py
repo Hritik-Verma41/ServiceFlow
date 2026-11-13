@@ -60,7 +60,7 @@ def resend_invitation(invitation):
     """
     Rotate a pending invitation's token and extend its expiry.
 
-    Only the new taken hash is persisted. Reutrns the invitation
+    Only the new token hash is persisted. Returns the invitation
     and the raw token needed to send the new invitation email.
     """
     if invitation.status != Invitation.Status.PENDING:

@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
+    'corsheaders',
     'rest_framework',
     "rest_framework_simplejwt.token_blacklist",
 
@@ -89,6 +90,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -241,3 +243,12 @@ SIMPLE_JWT = {
 LOGIN_URL = "/admin/login/"
 LOGIN_REDIRECT_URL = "/admin/"
 LOGOUT_REDIRECT_URL = "/admin/login/"
+
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+]
