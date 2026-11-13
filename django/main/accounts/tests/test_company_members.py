@@ -437,3 +437,248 @@ class CompanyMemberRoleUpdateAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+class CompanyMemberStatusUpdateAPITests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.company = Company.objects.create(
+            name="Status Update Test Company",
+            phone="9876543210",
+            email="status-company@example.com",
+        )
+
+        cls.other_company = Company.objects.create(
+            name="Other Status Test Company",
+            phone="1111111111",
+            email="other-status-company@example.com",
+        )
+
+        cls.admin = User.objects.create_user(
+            email="status-admin@example.com",
+            password="TestPassword123!",
+        )
+        cls.second_admin = User.objects.create_user(
+            email="status-admin2@example.com",
+            password="TestPassword123!",
+        )
+        cls.manager = User.objects.create_user(
+            email="status-manager@example.com",
+            password="TestPassword123!",
+        )
+        cls.technician = User.objects.create_user(
+            email="status-tech@example.com",
+            password="TestPassword123!",
+        )
+        cls.suspended_technician = User.objects.create_user(
+            email="status-suspended@example.com",
+            password="TestPassword123!",
+        )
+        cls.other_admin = User.objects.create_user(
+            email="status-other-admin@example.com",
+            password="TestPassword123!",
+        )
+
+        cls.admin_membership = CompanyMembership.objects.create(
+            user=cls.admin,
+            company=cls.company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        cls.second_admin_membership = CompanyMembership.objects.create(
+            user=cls.second_admin,
+            company=cls.company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        cls.manager_membership = CompanyMembership.objects.create(
+            user=cls.manager,
+            company=cls.company,
+            role=CompanyMembership.Role.MANAGER,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        cls.technician_membership = CompanyMembership.objects.create(
+            user=cls.technician,
+            company=cls.company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+        cls.suspended_membership = CompanyMembership.objects.create(
+            user=cls.suspended_technician,
+            company=cls.company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.SUSPENDED,
+        )
+        cls.other_admin_membership = CompanyMembership.objects.create(
+            user=cls.other_admin,
+            company=cls.other_company,
+            role=CompanyMembership.Role.COMPANY_ADMIN,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def status_url(self, membership):
+        return (
+            f"/api/companies/{self.company.id}/"
+            f"members/{membership.id}/status/"
+        )
+
+    def test_admin_can_suspend_technician(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(self.technician_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.technician_membership.refresh_from_db()
+        self.assertEqual(
+            self.technician_membership.status,
+            CompanyMembership.Status.SUSPENDED,
+        )
+
+    def test_admin_can_reactivate_suspended_technician(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(self.suspended_membership),
+            {"status": CompanyMembership.Status.ACTIVE},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.suspended_membership.refresh_from_db()
+        self.assertEqual(
+            self.suspended_membership.status,
+            CompanyMembership.Status.ACTIVE,
+        )
+
+    def test_manager_can_suspend_technician(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.patch(
+            self.status_url(self.technician_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_manager_can_reactivate_technician(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.patch(
+            self.status_url(self.suspended_membership),
+            {"status": CompanyMembership.Status.ACTIVE},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_manager_cannot_suspend_another_manager(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.patch(
+            self.status_url(self.manager_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_manager_cannot_suspend_company_admin(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.patch(
+            self.status_url(self.second_admin_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_last_active_admin_cannot_be_suspended(self):
+        self.client.force_authenticate(user=self.admin)
+
+        self.second_admin_membership.delete()
+
+        response = self.client.patch(
+            self.status_url(self.admin_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.admin_membership.refresh_from_db()
+        self.assertEqual(
+            self.admin_membership.status,
+            CompanyMembership.Status.ACTIVE,
+        )
+
+    def test_admin_can_suspend_one_of_multiple_active_admins(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(self.second_admin_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.second_admin_membership.refresh_from_db()
+        self.assertEqual(
+            self.second_admin_membership.status,
+            CompanyMembership.Status.SUSPENDED,
+        )
+
+    def test_membership_from_another_company_cannot_be_updated(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(self.other_admin_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_invited_membership_cannot_be_updated(self):
+        invited_membership = CompanyMembership.objects.create(
+            user=User.objects.create_user(
+                email="status-invited@example.com",
+                password="TestPassword123!",
+            ),
+            company=self.company,
+            role=CompanyMembership.Role.TECHNICIAN,
+            status=CompanyMembership.Status.INVITED,
+        )
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(invited_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_technician_cannot_update_membership_status(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.patch(
+            self.status_url(self.suspended_membership),
+            {"status": CompanyMembership.Status.ACTIVE},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_user_cannot_update_membership_status(self):
+        response = self.client.patch(
+            self.status_url(self.technician_membership),
+            {"status": CompanyMembership.Status.SUSPENDED},
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_invalid_status_is_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.status_url(self.technician_membership),
+            {"status": "INVITED"},
+        )
+
+        self.assertEqual(response.status_code, 400)

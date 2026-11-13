@@ -4,6 +4,7 @@ from .views import (
     CompanyInvitationCreateView,
     CompanyMemberListView,
     CompanyMemberRoleUpdateView,
+    CompanyMemberStatusUpdateView,
     InvitationAcceptView
 )
 
@@ -23,6 +24,11 @@ urlpatterns = [
         "companies/<uuid:company_id>/members/<uuid:membership_id>/role/",
         CompanyMemberRoleUpdateView.as_view(),
         name="company-member-role-update",
+    ),
+    path(
+        "companies/<uuid:company_id>/members/<uuid:membership_id>/status/",
+        CompanyMemberStatusUpdateView.as_view(),
+        name="company-member-status-update",
     ),
     path(
         "accounts/invitations/accept/",

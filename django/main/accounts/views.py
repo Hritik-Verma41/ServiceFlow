@@ -22,6 +22,7 @@ from .permissions import (
 )
 from .serializers import (
     CompanyMemberRoleUpdateSerializer,
+    CompanyMemberStatusUpdateSerializer,
     CompanyMembershipSerializer,
     InvitationAcceptSerializer,
     InvitationCreateSerializer
@@ -372,6 +373,97 @@ class CompanyMemberRoleUpdateView(APIView):
 
             membership.role = new_role
             membership.save(update_fields=["role", "updated_at"])
+
+        return Response(
+            CompanyMembershipSerializer(membership).data,
+            status=status.HTTP_200_OK,
+        )
+
+class CompanyMemberStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def patch(self, request, company_id, membership_id):
+        serializer = CompanyMemberStatusUpdateSerializer(
+            data=request.data
+        )
+        serializer.is_valid(raise_exception=True)
+
+        new_status = serializer.validated_data["status"]
+
+        with transaction.atomic():
+            company = get_object_or_404(
+                Company.objects.select_for_update(),
+                id=company_id,
+                is_active=True,
+            )
+
+            actor_membership = None
+
+            if not request.user.is_superuser:
+                actor_membership = (
+                    CompanyMembership.objects
+                    .select_for_update()
+                    .filter(
+                        user=request.user,
+                        company=company,
+                        status=CompanyMembership.Status.ACTIVE,
+                    )
+                    .first()
+                )
+
+                if actor_membership is None:
+                    return Response(
+                        {"detail": "You do not have access to this company."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            membership = get_object_or_404(
+                CompanyMembership.objects.select_for_update(),
+                id=membership_id,
+                company=company,
+                status__in=[
+                    CompanyMembership.Status.ACTIVE,
+                    CompanyMembership.Status.SUSPENDED,
+                ],
+            )
+
+            is_manager = (
+                actor_membership is not None
+                and actor_membership.role == CompanyMembership.Role.MANAGER
+            )
+
+            if is_manager and membership.role != CompanyMembership.Role.TECHNICIAN:
+                return Response(
+                    {"detail": "Managers can only change technician membership status."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if (
+                membership.role == CompanyMembership.Role.COMPANY_ADMIN
+                and membership.status == CompanyMembership.Status.ACTIVE
+                and new_status == CompanyMembership.Status.SUSPENDED
+            ):
+                active_admin_count = CompanyMembership.objects.filter(
+                    company=company,
+                    role=CompanyMembership.Role.COMPANY_ADMIN,
+                    status=CompanyMembership.Status.ACTIVE,
+                ).count()
+
+                if active_admin_count <= 1:
+                    return Response(
+                        {"detail": "The last active company admin cannot be suspended."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            membership.status = new_status
+            membership.save(update_fields=["status", "updated_at"])
 
         return Response(
             CompanyMembershipSerializer(membership).data,

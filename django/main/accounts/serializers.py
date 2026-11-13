@@ -65,3 +65,11 @@ class CompanyMemberRoleUpdateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
         choices=CompanyMembership.Role.choices,
     )
+
+class CompanyMemberStatusUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=[
+            CompanyMembership.Status.ACTIVE,
+            CompanyMembership.Status.SUSPENDED,
+        ],
+    )
