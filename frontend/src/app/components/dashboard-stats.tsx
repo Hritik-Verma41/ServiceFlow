@@ -10,10 +10,16 @@ interface ServiceJob {
     status: string;
 }
 
+interface CompanyMember {
+    role: string;
+    status: string;
+}
+
 export function DashboardStats() {
     const [totalJobs, setTotalJobs] = useState<number | null>(null);
     const [activeJobs, setActiveJobs] = useState<number | null>(null);
     const [error, setError] = useState("");
+    const [technicians, setTechnicians] = useState<number | null>(null);
 
     useEffect(() => {
         async function fetchStats() {
@@ -43,6 +49,25 @@ export function DashboardStats() {
                 if (companies.length === 0) {
                     throw new Error("No active company found.");
                 }
+
+                const membersResponse = await fetch(
+                    `${apiUrl}/api/companies/${companies[0].id}/members/`,
+                    { headers }
+                );
+
+                if (!membersResponse.ok) {
+                    throw new Error("Unable to load technician information.");
+                }
+
+                const members: CompanyMember[] = await membersResponse.json();
+
+                setTechnicians(
+                    members.filter(
+                        (member) =>
+                            member.role === "TECHNICIAN" &&
+                            member.status === "ACTIVE"
+                    ).length
+                );
 
                 const jobsResponse = await fetch(
                     `${apiUrl}/api/companies/${companies[0].id}/jobs/`,
@@ -79,7 +104,7 @@ export function DashboardStats() {
     const stats = [
         { label: "Total Jobs", value: totalJobs, icon: "▤" },
         { label: "Active Jobs", value: activeJobs, icon: "◷" },
-        { label: "Technicians", value: null, icon: "♙" },
+        { label: "Technicians", value: technicians, icon: "♙" },
         { label: "Revenue", value: null, icon: "₹" },
     ];
 
@@ -107,14 +132,14 @@ export function DashboardStats() {
 
                         <p className="mt-4 text-2xl font-semibold tracking-tight">
                             {stat.value === null
-                                ? stat.label === "Technicians" || stat.label === "Revenue"
+                                ? stat.label === "Revenue"
                                     ? "—"
                                     : "Loading..."
                                 : stat.value}
                         </p>
 
                         <p className="mt-2 text-xs text-slate-400">
-                            {stat.label === "Total Jobs" || stat.label === "Active Jobs"
+                            {stat.label !== "Revenue"
                                 ? "Live data"
                                 : "Not connected yet"}
                         </p>
