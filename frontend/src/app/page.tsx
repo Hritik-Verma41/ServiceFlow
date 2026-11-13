@@ -1,6 +1,7 @@
 import { AuthGuard } from "./components/auth-guard";
 import Image from "next/image";
 import { LogoutButton } from "./components/logout-button";
+import { MobileNavigation } from "./components/mobile-navigation";
 import { ThemeToggle } from "./components/theme-toggle";
 
 const stats = [
@@ -66,8 +67,8 @@ export default function Home() {
                   key={item.label}
                   href="#"
                   className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition ${index === 0
-                      ? "bg-blue-600 font-medium text-white"
-                      : "text-slate-400 hover:bg-white/5 hover:text-white"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-400 hover:bg-white/5 hover:text-white"
                     }`}
                 >
                   <span className="w-5 text-center text-lg">
@@ -97,13 +98,17 @@ export default function Home() {
 
           {/* Header */}
           <header className="flex min-h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 dark:border-slate-800 dark:bg-slate-900 sm:px-8">
-            <div>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Workspace / Overview
-              </p>
-              <h2 className="text-xl font-semibold tracking-tight">
-                Dashboard
-              </h2>
+            <div className="flex items-center gap-3">
+              <MobileNavigation />
+
+              <div>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Workspace / Overview
+                </p>
+                <h2 className="text-xl font-semibold tracking-tight">
+                  Dashboard
+                </h2>
+              </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -222,10 +227,10 @@ export default function Home() {
                         <td className="whitespace-nowrap px-5 py-4">
                           <span
                             className={`rounded-full px-2.5 py-1 text-xs font-medium ${job.status === "Completed"
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                                : job.status === "In Progress"
-                                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                  : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                              : job.status === "In Progress"
+                                ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
                               }`}
                           >
                             {job.status}
