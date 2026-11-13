@@ -15,9 +15,14 @@ function isTokenExpired(token: string): boolean {
 
         const base64 = payload
             .replace(/-/g, "+")
-            .replace(/-/g, "/");
+            .replace(/_/g, "/");
 
-        const decoded = JSON.parse(atob(base64));
+        const paddedBase64 = base64.padEnd(
+            Math.ceil(base64.length / 4) * 4,
+            "="
+        );
+
+        const decoded = JSON.parse(atob(paddedBase64));
 
         if (typeof decoded.exp !== "number") return true;
 
@@ -91,6 +96,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
             } catch {
                 sessionStorage.removeItem("accessToken");
                 sessionStorage.removeItem("refreshToken");
+
+                if (active) {
+                    router.replace("/login");
+                }
             }
         }
 
