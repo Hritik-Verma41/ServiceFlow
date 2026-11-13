@@ -1,12 +1,71 @@
-
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ThemeToggle } from "../components/theme-toggle";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleLogin(
+    event: React.SubmitEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+      if (!apiUrl) {
+        throw new Error("API URL is not configured.");
+      }
+
+      const response = await fetch(`${apiUrl}/api/auth/token/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Invalid email or password."
+        );
+      }
+
+      if (!data.access || !data.refresh) {
+        throw new Error("Invalid authentication response from server.");
+      }
+
+      sessionStorage.setItem("accessToken", data.access);
+      sessionStorage.setItem("refreshToken", data.refresh);
+
+      router.push("/");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to sign in. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const inputClass =
     "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 caret-blue-600 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:border-blue-400 dark:focus:ring-blue-900";
@@ -46,10 +105,13 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-5">
             {/* Email */}
             <div>
-              <label htmlFor="email" className={`${labelClass} mb-2`}>
+              <label
+                htmlFor="email"
+                className={`${labelClass} mb-2`}
+              >
                 Email address
               </label>
 
@@ -59,6 +121,8 @@ export default function LoginPage() {
                 type="email"
                 autoComplete="email"
                 placeholder="you@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
                 className={inputClass}
               />
@@ -67,12 +131,16 @@ export default function LoginPage() {
             {/* Password */}
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <label htmlFor="password" className={labelClass}>
+                <label
+                  htmlFor="password"
+                  className={labelClass}
+                >
                   Password
                 </label>
 
                 <a
                   href="#"
+                  onClick={(e) => e.preventDefault()}
                   className="text-sm font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                 >
                   Forgot password?
@@ -86,6 +154,8 @@ export default function LoginPage() {
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                   className={`${inputClass} pr-12`}
                 />
@@ -137,12 +207,23 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* Login Error */}
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400"
+              >
+                {error}
+              </p>
+            )}
+
             {/* Sign In */}
             <button
               type="submit"
-              className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900"
+              disabled={loading}
+              className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus:ring-offset-slate-900"
             >
-              Sign in
+              {loading ? "Signing in..." : "Sign in"}
             </button>
           </form>
 
