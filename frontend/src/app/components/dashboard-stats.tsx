@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { DashboardDateRange } from "./date-range-selector";
+
+interface DashboardStatsProps {
+    dateRange: DashboardDateRange;
+}
 
 interface Company {
     id: string;
@@ -20,7 +25,7 @@ interface RevenueResponse {
     currency: string;
 }
 
-export function DashboardStats() {
+export function DashboardStats({ dateRange }: DashboardStatsProps) {
     const [totalJobs, setTotalJobs] = useState<number | null>(null);
     const [activeJobs, setActiveJobs] = useState<number | null>(null);
     const [error, setError] = useState("");
@@ -28,8 +33,19 @@ export function DashboardStats() {
     const [revenue, setRevenue] = useState<string | null>(null);
 
     useEffect(() => {
+        const controller = new AbortController();
+
         async function fetchStats() {
             try {
+                setError("");
+
+                if (!dateRange.startDate || !dateRange.endDate) {
+                    setTotalJobs(null);
+                    setActiveJobs(null);
+                    setRevenue(null);
+                    return;
+                }
+
                 const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
                 const token = sessionStorage.getItem("accessToken");
 
@@ -43,7 +59,10 @@ export function DashboardStats() {
 
                 const companyResponse = await fetch(
                     `${apiUrl}/api/companies/`,
-                    { headers }
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!companyResponse.ok) {
@@ -58,16 +77,26 @@ export function DashboardStats() {
 
                 const companyId = companies[0].id;
 
+                const queryParams = new URLSearchParams({
+                    start_date: dateRange.startDate,
+                    end_date: dateRange.endDate,
+                });
+
+                // Fetch current technician count.
                 const membersResponse = await fetch(
                     `${apiUrl}/api/companies/${companyId}/members/`,
-                    { headers }
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!membersResponse.ok) {
                     throw new Error("Unable to load technician information.");
                 }
 
-                const members: CompanyMember[] = await membersResponse.json();
+                const members: CompanyMember[] =
+                    await membersResponse.json();
 
                 setTechnicians(
                     members.filter(
@@ -77,9 +106,13 @@ export function DashboardStats() {
                     ).length
                 );
 
+                // Fetch jobs created during the selected period.
                 const jobsResponse = await fetch(
-                    `${apiUrl}/api/companies/${companyId}/jobs/`,
-                    { headers }
+                    `${apiUrl}/api/companies/${companyId}/jobs/?${queryParams}`,
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!jobsResponse.ok) {
@@ -98,9 +131,13 @@ export function DashboardStats() {
                     ).length
                 );
 
+                // Fetch collected revenue during the selected period.
                 const revenueResponse = await fetch(
-                    `${apiUrl}/api/companies/${companyId}/revenue/`,
-                    { headers }
+                    `${apiUrl}/api/companies/${companyId}/revenue/?${queryParams}`,
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!revenueResponse.ok) {
@@ -119,6 +156,13 @@ export function DashboardStats() {
                     }).format(Number(revenueData.collected_revenue))
                 );
             } catch (err) {
+                if (
+                    err instanceof Error &&
+                    err.name === "AbortError"
+                ) {
+                    return;
+                }
+
                 setError(
                     err instanceof Error
                         ? err.message
@@ -128,7 +172,9 @@ export function DashboardStats() {
         }
 
         fetchStats();
-    }, []);
+
+        return () => controller.abort();
+    }, [dateRange.startDate, dateRange.endDate]);
 
     const stats = [
         { label: "Total Jobs", value: totalJobs, icon: "▤" },
@@ -166,7 +212,9 @@ export function DashboardStats() {
                         </p>
 
                         <p className="mt-2 text-xs text-slate-400">
-                            Live data
+                            {stat.label === "Technicians"
+                                ? "Current active team"
+                                : "Selected date range"}
                         </p>
                     </div>
                 ))}

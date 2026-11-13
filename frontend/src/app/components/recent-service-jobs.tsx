@@ -1,6 +1,7 @@
-"use client"
+"use client";
 
 import { useEffect, useState } from "react";
+import type { DashboardDateRange } from "./date-range-selector";
 
 interface ServiceJob {
     id: string;
@@ -15,48 +16,74 @@ interface Company {
     name: string;
 }
 
-export function RecentServiceJobs() {
+interface RecentServiceJobsProps {
+    dateRange: DashboardDateRange;
+}
+
+export function RecentServiceJobs({
+    dateRange,
+}: RecentServiceJobsProps) {
     const [jobs, setJobs] = useState<ServiceJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
     useEffect(() => {
+        const controller = new AbortController();
+
         async function fetchJobs() {
             try {
+                setLoading(true);
+                setError("");
+
+                if (!dateRange.startDate || !dateRange.endDate) {
+                    setJobs([]);
+                    return;
+                }
+
                 const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
                 const token = sessionStorage.getItem("accessToken");
 
                 if (!apiUrl || !token) {
-                    throw new Error("API configuration or sesion is missing.")
+                    throw new Error(
+                        "API configuration or session is missing."
+                    );
                 }
+
+                const headers = {
+                    Authorization: `Bearer ${token}`,
+                };
 
                 const companyResponse = await fetch(
                     `${apiUrl}/api/companies/`,
                     {
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                        },
+                        headers,
+                        signal: controller.signal,
                     }
                 );
 
                 if (!companyResponse.ok) {
-                    throw new Error("Unable to load company information.");
+                    throw new Error(
+                        "Unable to load company information."
+                    );
                 }
 
-                const companies: Company[] = await companyResponse.json();
+                const companies: Company[] =
+                    await companyResponse.json();
 
                 if (companies.length === 0) {
                     throw new Error("No active company found.");
                 }
 
-                const company = companies[0];
+                const queryParams = new URLSearchParams({
+                    start_date: dateRange.startDate,
+                    end_date: dateRange.endDate,
+                });
 
                 const jobResponse = await fetch(
-                    `${apiUrl}/api/companies/${company.id}/jobs/`,
+                    `${apiUrl}/api/companies/${companies[0].id}/jobs/?${queryParams}`,
                     {
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                        },
+                        headers,
+                        signal: controller.signal,
                     }
                 );
 
@@ -68,18 +95,29 @@ export function RecentServiceJobs() {
 
                 setJobs(data.slice(0, 5));
             } catch (err) {
+                if (
+                    err instanceof Error &&
+                    err.name === "AbortError"
+                ) {
+                    return;
+                }
+
                 setError(
                     err instanceof Error
                         ? err.message
                         : "Something went wrong."
                 );
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         }
 
         fetchJobs();
-    }, []);
+
+        return () => controller.abort();
+    }, [dateRange.startDate, dateRange.endDate]);
 
     function formatStatus(status: string) {
         return status
@@ -115,7 +153,7 @@ export function RecentServiceJobs() {
                 <div>
                     <h3 className="font-semibold">Recent Service Jobs</h3>
                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        A snapshot of your latest service activity.
+                        Your five latest jobs within the selected date range.
                     </p>
                 </div>
             </div>
@@ -134,20 +172,29 @@ export function RecentServiceJobs() {
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {loading ? (
                             <tr>
-                                <td colSpan={4} className="px-5 py-10 text-center text-slate-500">
+                                <td
+                                    colSpan={4}
+                                    className="px-5 py-10 text-center text-slate-500"
+                                >
                                     Loading service jobs...
                                 </td>
                             </tr>
                         ) : error ? (
                             <tr>
-                                <td colSpan={4} className="px-5 py-10 text-center text-red-500">
+                                <td
+                                    colSpan={4}
+                                    className="px-5 py-10 text-center text-red-500"
+                                >
                                     {error}
                                 </td>
                             </tr>
                         ) : jobs.length === 0 ? (
                             <tr>
-                                <td colSpan={4} className="px-5 py-10 text-center text-slate-500">
-                                    No service jobs found.
+                                <td
+                                    colSpan={4}
+                                    className="px-5 py-10 text-center text-slate-500"
+                                >
+                                    No service jobs found for this date range.
                                 </td>
                             </tr>
                         ) : (
@@ -157,19 +204,26 @@ export function RecentServiceJobs() {
                                     className="transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
                                 >
                                     <td className="px-5 py-4">
-                                        <p className="font-medium">{job.title}</p>
+                                        <p className="font-medium">
+                                            {job.title}
+                                        </p>
                                         <p className="mt-1 text-xs text-slate-400">
                                             {job.id.slice(0, 8).toUpperCase()}
                                         </p>
                                     </td>
+
                                     <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
                                         {formatStatus(job.priority)}
                                     </td>
+
                                     <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
                                         {formatDate(job.created_at)}
                                     </td>
+
                                     <td className="whitespace-nowrap px-5 py-4">
-                                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle(job.status)}`}>
+                                        <span
+                                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle(job.status)}`}
+                                        >
                                             {formatStatus(job.status)}
                                         </span>
                                     </td>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AuthGuard } from "./components/auth-guard";
 import { useCurrentUser } from "./components/current-user-provider";
 import { DashboardStats } from "./components/dashboard-stats";
@@ -10,6 +11,10 @@ import { MobileNavigation } from "./components/mobile-navigation";
 import { RecentActivityFeed } from "./components/recent-activity-feed";
 import { RecentServiceJobs } from "./components/recent-service-jobs";
 import { ThemeToggle } from "./components/theme-toggle";
+import {
+    DateRangeSelector,
+    type DashboardDateRange,
+} from "./components/date-range-selector";
 
 const navigation = [
     { icon: "⌂", label: "Overview" },
@@ -20,8 +25,42 @@ const navigation = [
     { icon: "₹", label: "Invoices" },
 ];
 
+function getDefaultDateRange(): DashboardDateRange {
+    const today = new Date();
+
+    const endDate = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    const start = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate()
+    );
+
+    start.setDate(start.getDate() - 29);
+
+    const startDate = [
+        start.getFullYear(),
+        String(start.getMonth() + 1).padStart(2, "0"),
+        String(start.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    return {
+        preset: "LAST_30_DAYS",
+        startDate,
+        endDate,
+    };
+}
+
 function DashboardContent() {
     const { user, loading } = useCurrentUser();
+
+    const [dateRange, setDateRange] = useState<DashboardDateRange>(
+        getDefaultDateRange
+    );
 
     const displayName =
         user?.full_name?.trim() ||
@@ -163,35 +202,42 @@ function DashboardContent() {
                 <div className="mx-auto max-w-7xl space-y-8 p-5 sm:p-8">
 
                     {/* Welcome Section */}
-                    <section className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                            <h3 className="text-2xl font-semibold tracking-tight">
-                                {loading
-                                    ? "Welcome back..."
-                                    : `Welcome back, ${firstName} 👋`}
-                            </h3>
+                    <section className="flex flex-col gap-5">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-2xl font-semibold tracking-tight">
+                                    {loading
+                                        ? "Welcome back..."
+                                        : `Welcome back, ${firstName} 👋`}
+                                </h3>
 
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                                Here's what's happening with your operations today.
-                            </p>
+                                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                    Here's what's happening with your operations today.
+                                </p>
+                            </div>
+
+                            <button className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+                                + Create Service Job
+                            </button>
                         </div>
 
-                        <button className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
-                            + Create Service Job
-                        </button>
+                        <DateRangeSelector
+                            value={dateRange}
+                            onChange={setDateRange}
+                        />
                     </section>
 
                     {/* Dashboard Statistics */}
-                    <DashboardStats />
+                    <DashboardStats dateRange={dateRange} />
 
                     {/* Job Status Breakdown */}
-                    <JobStatusBreakdown />
+                    <JobStatusBreakdown dateRange={dateRange} />
 
                     {/* Recent Activity Feed */}
-                    <RecentActivityFeed />
+                    <RecentActivityFeed dateRange={dateRange} />
 
                     {/* Recent Service Jobs */}
-                    <RecentServiceJobs />
+                    <RecentServiceJobs dateRange={dateRange} />
                 </div>
             </main>
         </div>

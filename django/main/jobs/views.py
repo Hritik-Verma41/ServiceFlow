@@ -1,11 +1,13 @@
 import uuid
 
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,6 +42,62 @@ from .serializers import (
     StockAdjustmentSerializer,
 )
 
+def filter_queryset_by_date_range(queryset, request, date_field):
+    start_date_value = request.query_params.get("start_date")
+    end_date_value = request.query_params.get("end_date")
+
+    # No date range supplied: preserve existing API behaviour.
+    if not start_date_value and not end_date_value:
+        return queryset
+
+    # Both dates are required together.
+    if not start_date_value or not end_date_value:
+        raise ValidationError({
+            "date_range": "Both start_date and end_date are required."
+        })
+
+    try:
+        start_date = datetime.strptime(
+            start_date_value,
+            "%Y-%m-%d",
+        ).date()
+
+        end_date = datetime.strptime(
+            end_date_value,
+            "%Y-%m-%d",
+        ).date()
+
+    except ValueError:
+        raise ValidationError({
+            "date_range": "Dates must use YYYY-MM-DD format."
+        })
+
+    if start_date > end_date:
+        raise ValidationError({
+            "date_range": "start_date must be on or before end_date."
+        })
+
+    current_timezone = timezone.get_current_timezone()
+
+    start_datetime = timezone.make_aware(
+        datetime.combine(start_date, time.min),
+        current_timezone,
+    )
+
+    end_datetime = timezone.make_aware(
+        datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+        ),
+        current_timezone,
+    )
+
+    return queryset.filter(
+        **{
+            f"{date_field}__gte": start_datetime,
+            f"{date_field}__lt": end_datetime,
+        }
+    )
 
 class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
     serializer_class = ServiceJobSerializer
@@ -72,6 +130,12 @@ class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
             "customer",
             "service_address",
             "assigned_technician",
+        )
+
+        queryset = filter_queryset_by_date_range(
+            queryset,
+            self.request,
+            "created_at",
         )
 
         if self.request.user.is_superuser:
@@ -780,6 +844,12 @@ class CompanyCollectedRevenueView(APIView):
             ],
         )
 
+        payments = filter_queryset_by_date_range(
+            payments,
+            request,
+            "paid_at",
+        )
+
         from django.db.models import Sum, F, DecimalField, Value
         from django.db.models.functions import Greatest, Coalesce
 
@@ -893,6 +963,12 @@ class CompanyActivityListView(generics.ListAPIView):
         ).select_related(
             "actor",
             "job",
+        )
+
+        queryset = filter_queryset_by_date_range(
+            queryset,
+            self.request,
+            "created_at",
         )
 
         if self.request.user.is_superuser:

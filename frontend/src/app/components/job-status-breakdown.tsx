@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { DashboardDateRange } from "./date-range-selector";
 
 interface Company {
     id: string;
@@ -8,6 +9,10 @@ interface Company {
 
 interface ServiceJob {
     status: string;
+}
+
+interface JobStatusBreakdownProps {
+    dateRange: DashboardDateRange;
 }
 
 const jobStatuses = [
@@ -18,14 +23,26 @@ const jobStatuses = [
     { key: "CANCELLED", label: "Cancelled", color: "bg-slate-400" },
 ];
 
-export function JobStatusBreakdown() {
+export function JobStatusBreakdown({
+    dateRange,
+}: JobStatusBreakdownProps) {
     const [jobs, setJobs] = useState<ServiceJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
     useEffect(() => {
+        const controller = new AbortController();
+
         async function fetchJobs() {
             try {
+                setLoading(true);
+                setError("");
+
+                if (!dateRange.startDate || !dateRange.endDate) {
+                    setJobs([]);
+                    return;
+                }
+
                 const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
                 const token = sessionStorage.getItem("accessToken");
 
@@ -39,7 +56,10 @@ export function JobStatusBreakdown() {
 
                 const companyResponse = await fetch(
                     `${apiUrl}/api/companies/`,
-                    { headers }
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!companyResponse.ok) {
@@ -52,9 +72,17 @@ export function JobStatusBreakdown() {
                     throw new Error("No active company found.");
                 }
 
+                const queryParams = new URLSearchParams({
+                    start_date: dateRange.startDate,
+                    end_date: dateRange.endDate,
+                });
+
                 const jobsResponse = await fetch(
-                    `${apiUrl}/api/companies/${companies[0].id}/jobs/`,
-                    { headers }
+                    `${apiUrl}/api/companies/${companies[0].id}/jobs/?${queryParams}`,
+                    {
+                        headers,
+                        signal: controller.signal,
+                    }
                 );
 
                 if (!jobsResponse.ok) {
@@ -64,18 +92,29 @@ export function JobStatusBreakdown() {
                 const data: ServiceJob[] = await jobsResponse.json();
                 setJobs(data);
             } catch (err) {
+                if (
+                    err instanceof Error &&
+                    err.name === "AbortError"
+                ) {
+                    return;
+                }
+
                 setError(
                     err instanceof Error
                         ? err.message
                         : "Unable to load job status breakdown."
                 );
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         }
 
         fetchJobs();
-    }, []);
+
+        return () => controller.abort();
+    }, [dateRange.startDate, dateRange.endDate]);
 
     const totalJobs = jobs.length;
 
@@ -98,7 +137,7 @@ export function JobStatusBreakdown() {
                 </p>
             ) : totalJobs === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-500">
-                    No service jobs available.
+                    No service jobs available for this date range.
                 </p>
             ) : (
                 <div className="space-y-5">
@@ -141,7 +180,9 @@ export function JobStatusBreakdown() {
                     <span className="text-sm text-slate-500 dark:text-slate-400">
                         Total Service Jobs
                     </span>
-                    <span className="font-semibold">{loading ? "—" : totalJobs}</span>
+                    <span className="font-semibold">
+                        {loading ? "—" : totalJobs}
+                    </span>
                 </div>
             </div>
         </section>
