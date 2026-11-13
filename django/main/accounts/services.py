@@ -56,6 +56,29 @@ def create_invitation(
 
     return invitation, raw_token
 
+def resend_invitation(invitation):
+    """
+    Rotate a pending invitation's token and extend its expiry.
+
+    Only the new taken hash is persisted. Reutrns the invitation
+    and the raw token needed to send the new invitation email.
+    """
+    if invitation.status != Invitation.Status.PENDING:
+        raise InvalidInvitationError(
+            "Only pending invitations can be resent."
+        )
+
+    raw_token = secrets.token_urlsafe(32)
+    invitation.token_hash = hash_invitation_token(raw_token)
+    invitation.expires_at = (
+        timezone.now() + timedelta(days=INVITATION_EXPIRY_DAYS)
+    )
+    invitation.save(
+        update_fields=["token_hash", "expires_at", "updated_at"]
+    )
+
+    return invitation, raw_token
+
 def get_valid_invitation(token):
     """
     Find a usable invitation using the raw token.

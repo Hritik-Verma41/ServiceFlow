@@ -33,6 +33,7 @@ from .services import (
     accept_invitation,
     create_invitation,
     get_valid_invitation,
+    resend_invitation,
 )
 
 
@@ -238,6 +239,96 @@ class CompanyInvitationRevokeView(APIView):
 
         return Response(
             {"detail": "Invitation revoked successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+class CompanyInvitationResendView(APIView):
+    permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def post(self, request, company_id, invitation_id):
+        try:
+            with transaction.atomic():
+                company = get_object_or_404(
+                    Company.objects.select_for_update(),
+                    id=company_id,
+                    is_active=True,
+                )
+
+                actor_membership = None
+
+                if not request.user.is_superuser:
+                    actor_membership = (
+                        CompanyMembership.objects
+                        .select_for_update()
+                        .filter(
+                            user=request.user,
+                            company=company,
+                            status=CompanyMembership.Status.ACTIVE,
+                        )
+                        .first()
+                    )
+
+                    if actor_membership is None:
+                        return Response(
+                            {"detail": "You do not have access to this company."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+
+                invitation = get_object_or_404(
+                    Invitation.objects.select_for_update(),
+                    id=invitation_id,
+                    company=company,
+                    status=Invitation.Status.PENDING,
+                )
+
+                if (
+                    actor_membership is not None
+                    and actor_membership.role == CompanyMembership.Role.MANAGER
+                    and invitation.role == Invitation.Role.COMPANY_ADMIN
+                ):
+                    return Response(
+                        {"detail": "Managers cannot resend company admin invitations."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                invitation, raw_token = resend_invitation(invitation)
+
+                try:
+                    send_company_invitation_email(invitation, raw_token)
+                except (SMTPException, OSError) as exc:
+                    raise InvitationEmailDeliveryError from exc
+
+        except InvitationEmailDeliveryError:
+            logger.exception(
+                "Failed to resend invitation email for company %s to %s",
+                company_id,
+                invitation.email,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "The invitation email could not be sent. "
+                        "The previous invitation remains valid."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "detail": "Invitation resent successfully.",
+                "id": str(invitation.id),
+                "email": invitation.email,
+                "status": invitation.status,
+                "expires_at": invitation.expires_at,
+            },
             status=status.HTTP_200_OK,
         )
 

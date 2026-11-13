@@ -9,7 +9,12 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from main.accounts.models import CompanyMembership, Invitation, User
-from main.accounts.services import create_invitation, hash_invitation_token
+from main.accounts.services import (
+    create_invitation,
+    get_valid_invitation,
+    hash_invitation_token,
+    InvalidInvitationError,
+)
 from main.companies.models import Company
 
 
@@ -537,6 +542,246 @@ class CompanyInvitationRevokeAPITests(APITestCase):
         response = self.client.delete(
             reverse(
                 "company-invitation-revoke",
+                kwargs={
+                    "company_id": self.company.id,
+                    "invitation_id": invitation.id,
+                },
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+class CompanyInvitationResendAPITests(APITestCase):
+    def setUp(self):
+        self.company = Company.objects.create(
+            name="Resend Test Company",
+            phone="9876543210",
+            email="resend-company@example.com",
+        )
+        self.other_company = Company.objects.create(
+            name="Other Resend Company",
+            phone="9876543211",
+            email="other-resend@example.com",
+        )
+
+        self.admin = User.objects.create_user(
+            email="resend-admin@example.com",
+            password="TestPassword123!",
+        )
+        self.manager = User.objects.create_user(
+            email="resend-manager@example.com",
+            password="TestPassword123!",
+        )
+        self.technician = User.objects.create_user(
+            email="resend-tech@example.com",
+            password="TestPassword123!",
+        )
+        self.other_admin = User.objects.create_user(
+            email="other-resend-admin@example.com",
+            password="TestPassword123!",
+        )
+
+        self.add_membership(
+            self.admin, self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+        self.add_membership(
+            self.manager, self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+        self.add_membership(
+            self.technician, self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+        self.add_membership(
+            self.other_admin, self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+    def add_membership(self, user, company, role):
+        return CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+    def create_invitation(self, company=None, role=None, status_value=None):
+        invitation, token = create_invitation(
+            company=company or self.company,
+            email="pending-resend@example.com",
+            role=role or Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        if status_value:
+            invitation.status = status_value
+            invitation.save(update_fields=["status", "updated_at"])
+
+        return invitation, token
+
+    def resend(self, user, invitation):
+        self.client.force_authenticate(user=user)
+
+        return self.client.post(
+            reverse(
+                "company-invitation-resend",
+                kwargs={
+                    "company_id": self.company.id,
+                    "invitation_id": invitation.id,
+                },
+            )
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_URL="http://localhost:3000",
+    )
+    def test_admin_can_resend_pending_invitation(self):
+        invitation, old_token = self.create_invitation()
+        old_expiry = invitation.expires_at
+
+        response = self.resend(self.admin, invitation)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.PENDING)
+        self.assertNotEqual(
+            invitation.token_hash,
+            hash_invitation_token(old_token),
+        )
+        self.assertGreater(invitation.expires_at, old_expiry)
+
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["pending-resend@example.com"])
+
+        new_token = email.body.split(
+            "/accept-invitation?token=", 1
+        )[1].split()[0]
+
+        self.assertEqual(
+            invitation.token_hash,
+            hash_invitation_token(new_token),
+        )
+        self.assertNotEqual(new_token, old_token)
+
+        with self.assertRaises(InvalidInvitationError):
+            get_valid_invitation(old_token)
+
+        self.assertEqual(
+            get_valid_invitation(new_token).id,
+            invitation.id,
+        )
+
+    def test_manager_can_resend_technician_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.resend(self.manager, invitation)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_manager_cannot_resend_company_admin_invitation(self):
+        invitation, _ = self.create_invitation(
+            role=Invitation.Role.COMPANY_ADMIN,
+        )
+        old_hash = invitation.token_hash
+
+        response = self.resend(self.manager, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.token_hash, old_hash)
+
+    def test_technician_cannot_resend_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.resend(self.technician, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_user_from_another_company_cannot_resend_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.resend(self.other_admin, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_invitation_from_another_company_returns_not_found(self):
+        invitation, _ = self.create_invitation(
+            company=self.other_company,
+        )
+
+        response = self.resend(self.admin, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_non_pending_invitation_cannot_be_resent(self):
+        for invitation_status in [
+            Invitation.Status.ACCEPTED,
+            Invitation.Status.EXPIRED,
+            Invitation.Status.REVOKED,
+        ]:
+            invitation, _ = self.create_invitation(
+                status_value=invitation_status,
+            )
+
+            response = self.resend(self.admin, invitation)
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_404_NOT_FOUND,
+            )
+
+    @patch(
+        "main.accounts.views.send_company_invitation_email",
+        side_effect=OSError("SMTP unavailable"),
+    )
+    def test_email_failure_rolls_back_token_and_expiry(self, mock_send_email):
+        invitation, old_token = self.create_invitation()
+        old_hash = invitation.token_hash
+        old_expiry = invitation.expires_at
+
+        response = self.resend(self.admin, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.token_hash, old_hash)
+        self.assertEqual(invitation.expires_at, old_expiry)
+
+        self.assertEqual(
+            get_valid_invitation(old_token).id,
+            invitation.id,
+        )
+        mock_send_email.assert_called_once()
+
+    def test_unauthenticated_user_cannot_resend_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.client.post(
+            reverse(
+                "company-invitation-resend",
                 kwargs={
                     "company_id": self.company.id,
                     "invitation_id": invitation.id,
