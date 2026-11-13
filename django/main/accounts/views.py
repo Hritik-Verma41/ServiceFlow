@@ -178,6 +178,68 @@ class CompanyInvitationCreateView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+class CompanyInvitationRevokeView(APIView):
+    permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def delete(self, request, company_id, invitation_id):
+        with transaction.atomic():
+            company = get_object_or_404(
+                Company.objects.select_for_update(),
+                id=company_id,
+                is_active=True,
+            )
+
+            actor_membership = None
+
+            if not request.user.is_superuser:
+                actor_membership = (
+                    CompanyMembership.objects
+                    .select_for_update()
+                    .filter(
+                        user=request.user,
+                        company=company,
+                        status=CompanyMembership.Status.ACTIVE,
+                    )
+                    .first()
+                )
+
+                if actor_membership is None:
+                    return Response(
+                        {"detail": "You do not have access to this company."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            invitation = get_object_or_404(
+                Invitation.objects.select_for_update(),
+                id=invitation_id,
+                company=company,
+                status=Invitation.Status.PENDING,
+            )
+
+            if (
+                actor_membership is not None
+                and actor_membership.role == CompanyMembership.Role.MANAGER
+                and invitation.role == Invitation.Role.COMPANY_ADMIN
+            ):
+                return Response(
+                    {"detail": "Manager cannot revoke company admin invitations."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            invitation.status = Invitation.Status.REVOKED
+            invitation.save(update_fields=["status", "updated_at"])
+
+        return Response(
+            {"detail": "Invitation revoked successfully."},
+            status=status.HTTP_200_OK,
+        )
 
 class InvitationAcceptView(APIView):
     permission_classes = [AllowAny]

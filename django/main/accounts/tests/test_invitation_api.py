@@ -364,3 +364,187 @@ class CompanyInvitationAPITests(APITestCase):
         )
 
         mock_send_email.assert_called_once()
+
+class CompanyInvitationRevokeAPITests(APITestCase):
+    def setUp(self):
+        self.company = Company.objects.create(
+            name="Revoke Test Company",
+            phone="9876543210",
+            email="revoke-company@example.com",
+        )
+        self.other_company = Company.objects.create(
+            name="Other Revoke Company",
+            phone="9876543211",
+            email="other-revoke@example.com",
+        )
+
+        self.admin = User.objects.create_user(
+            email="revoke-admin@example.com",
+            password="TestPassword123!",
+        )
+        self.manager = User.objects.create_user(
+            email="revoke-manager@example.com",
+            password="TestPassword123!",
+        )
+        self.technician = User.objects.create_user(
+            email="revoke-tech@example.com",
+            password="TestPassword123!",
+        )
+        self.other_admin = User.objects.create_user(
+            email="other-revoke-admin@example.com",
+            password="TestPassword123!",
+        )
+
+        self.add_membership(
+            self.admin, self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+        self.add_membership(
+            self.manager, self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+        self.add_membership(
+            self.technician, self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+        self.add_membership(
+            self.other_admin, self.other_company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+    def add_membership(self, user, company, role):
+        return CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+    def create_invitation(self, company=None, role=None, status_value=None):
+        invitation, token = create_invitation(
+            company=company or self.company,
+            email="pending-tech@example.com",
+            role=role or Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        if status_value:
+            invitation.status = status_value
+            invitation.save(update_fields=["status", "updated_at"])
+
+        return invitation, token
+
+    def revoke(self, user, invitation):
+        self.client.force_authenticate(user=user)
+
+        return self.client.delete(
+            reverse(
+                "company-invitation-revoke",
+                kwargs={
+                    "company_id": self.company.id,
+                    "invitation_id": invitation.id,
+                },
+            )
+        )
+
+    def test_admin_can_revoke_pending_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.revoke(self.admin, invitation)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.REVOKED)
+
+    def test_manager_can_revoke_technician_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.revoke(self.manager, invitation)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.REVOKED)
+
+    def test_manager_cannot_revoke_company_admin_invitation(self):
+        invitation, _ = self.create_invitation(
+            role=Invitation.Role.COMPANY_ADMIN,
+        )
+
+        response = self.revoke(self.manager, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, Invitation.Status.PENDING)
+
+    def test_technician_cannot_revoke_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.revoke(self.technician, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_user_from_another_company_cannot_revoke_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.revoke(self.other_admin, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_invitation_from_another_company_returns_not_found(self):
+        invitation, _ = self.create_invitation(
+            company=self.other_company,
+        )
+
+        response = self.revoke(self.admin, invitation)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_non_pending_invitation_cannot_be_revoked(self):
+        for invitation_status in [
+            Invitation.Status.ACCEPTED,
+            Invitation.Status.EXPIRED,
+            Invitation.Status.REVOKED,
+        ]:
+            invitation, _ = self.create_invitation(
+                status_value=invitation_status,
+            )
+
+            response = self.revoke(self.admin, invitation)
+
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_404_NOT_FOUND,
+            )
+
+    def test_unauthenticated_user_cannot_revoke_invitation(self):
+        invitation, _ = self.create_invitation()
+
+        response = self.client.delete(
+            reverse(
+                "company-invitation-revoke",
+                kwargs={
+                    "company_id": self.company.id,
+                    "invitation_id": invitation.id,
+                },
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
