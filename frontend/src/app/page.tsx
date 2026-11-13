@@ -1,5 +1,6 @@
 import { AuthGuard } from "./components/auth-guard";
 import Image from "next/image";
+import { LogoutButton } from "./components/logout-button";
 import { ThemeToggle } from "./components/theme-toggle";
 
 const stats = [
@@ -117,7 +118,7 @@ export default function Home() {
                 ♧
                 <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-600" />
               </button>
-
+              <LogoutButton />
               <ThemeToggle />
             </div>
           </header>
