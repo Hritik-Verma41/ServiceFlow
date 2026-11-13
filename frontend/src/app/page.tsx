@@ -1,4 +1,5 @@
 import { AuthGuard } from "./components/auth-guard";
+import { DashboardStats } from "./components/dashboard-stats";
 import Image from "next/image";
 import { LogoutButton } from "./components/logout-button";
 import { MobileNavigation } from "./components/mobile-navigation";
@@ -147,32 +148,8 @@ export default function Home() {
               </button>
             </section>
 
-            {/* Statistics */}
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {stats.map((stat) => (
-                <div
-                  key={stat.label}
-                  className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                      {stat.label}
-                    </p>
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-lg text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-                      {stat.icon}
-                    </span>
-                  </div>
-
-                  <p className="mt-4 text-2xl font-semibold tracking-tight">
-                    {stat.value}
-                  </p>
-
-                  <p className="mt-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    {stat.change}
-                  </p>
-                </div>
-              ))}
-            </section>
+            {/* Dashboard Statistics */}
+            <DashboardStats />
 
             {/* Recent Service Jobs */}
             <RecentServiceJobs />
