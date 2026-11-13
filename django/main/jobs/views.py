@@ -1,5 +1,7 @@
 import uuid
 
+from decimal import Decimal
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -21,6 +23,7 @@ from .models import (
     JobNote,
     JobPart,
     Part,
+    Payment,
     ServiceJob,
     StockMovement,
 )
@@ -670,6 +673,50 @@ class CompanyInvoiceListCreateView(generics.ListCreateAPIView):
             response_serializer.data,
             status=status.HTTP_201_CREATED,
         )
+
+class CompanyCollectedRevenueView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get(self, request, *args, **kwargs):
+        company = get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+        payments = Payment.objects.filter(
+            invoice__company=company,
+            status__in=[
+                Payment.Status.SUCCESS,
+                Payment.Status.PARTIALLY_REFUNDED,
+                Payment.Status.REFUNDED,
+            ],
+        )
+
+        from django.db.models import Sum, F, DecimalField, Value
+        from django.db.models.functions import Greatest, Coalesce
+
+        total_collected = payments.aggregate(
+            total=Sum(
+                Greatest(
+                    F("amount") - F("refunded_amount"),
+                    Value(Decimal("0.00")),
+                    output_field=DecimalField(
+                        max_digits=12,
+                        decimal_places=2,
+                    ),
+                ),
+            )
+        )["total"] or Decimal("0.00")
+
+        return Response({
+            "company_id": str(company.id),
+            "collected_revenue": str(total_collected),
+            "currency": "INR",
+        })
 
 class CompanyInvoiceDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [

@@ -15,11 +15,17 @@ interface CompanyMember {
     status: string;
 }
 
+interface RevenueResponse {
+    collected_revenue: string;
+    currency: string;
+}
+
 export function DashboardStats() {
     const [totalJobs, setTotalJobs] = useState<number | null>(null);
     const [activeJobs, setActiveJobs] = useState<number | null>(null);
     const [error, setError] = useState("");
     const [technicians, setTechnicians] = useState<number | null>(null);
+    const [revenue, setRevenue] = useState<string | null>(null);
 
     useEffect(() => {
         async function fetchStats() {
@@ -50,8 +56,10 @@ export function DashboardStats() {
                     throw new Error("No active company found.");
                 }
 
+                const companyId = companies[0].id;
+
                 const membersResponse = await fetch(
-                    `${apiUrl}/api/companies/${companies[0].id}/members/`,
+                    `${apiUrl}/api/companies/${companyId}/members/`,
                     { headers }
                 );
 
@@ -70,7 +78,7 @@ export function DashboardStats() {
                 );
 
                 const jobsResponse = await fetch(
-                    `${apiUrl}/api/companies/${companies[0].id}/jobs/`,
+                    `${apiUrl}/api/companies/${companyId}/jobs/`,
                     { headers }
                 );
 
@@ -89,6 +97,27 @@ export function DashboardStats() {
                             job.status !== "CANCELLED"
                     ).length
                 );
+
+                const revenueResponse = await fetch(
+                    `${apiUrl}/api/companies/${companyId}/revenue/`,
+                    { headers }
+                );
+
+                if (!revenueResponse.ok) {
+                    throw new Error("Unable to load revenue information.");
+                }
+
+                const revenueData: RevenueResponse =
+                    await revenueResponse.json();
+
+                setRevenue(
+                    new Intl.NumberFormat("en-IN", {
+                        style: "currency",
+                        currency: revenueData.currency,
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    }).format(Number(revenueData.collected_revenue))
+                );
             } catch (err) {
                 setError(
                     err instanceof Error
@@ -105,7 +134,7 @@ export function DashboardStats() {
         { label: "Total Jobs", value: totalJobs, icon: "▤" },
         { label: "Active Jobs", value: activeJobs, icon: "◷" },
         { label: "Technicians", value: technicians, icon: "♙" },
-        { label: "Revenue", value: null, icon: "₹" },
+        { label: "Revenue", value: revenue, icon: "₹" },
     ];
 
     return (
@@ -132,16 +161,12 @@ export function DashboardStats() {
 
                         <p className="mt-4 text-2xl font-semibold tracking-tight">
                             {stat.value === null
-                                ? stat.label === "Revenue"
-                                    ? "—"
-                                    : "Loading..."
+                                ? "Loading..."
                                 : stat.value}
                         </p>
 
                         <p className="mt-2 text-xs text-slate-400">
-                            {stat.label !== "Revenue"
-                                ? "Live data"
-                                : "Not connected yet"}
+                            Live data
                         </p>
                     </div>
                 ))}

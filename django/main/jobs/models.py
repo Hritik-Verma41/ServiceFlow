@@ -429,16 +429,21 @@ class Invoice(models.Model):
 
     @property
     def paid_amount(self):
-        from decimal import Decimal
-
         return sum(
             (
-                payment.amount
+                max(
+                    payment.amount - payment.refunded_amount,
+                    Decimal("0.00"),
+                )
                 for payment in self.payments.filter(
-                    status=Payment.Status.SUCCESS
+                    status__in=[
+                        Payment.Status.SUCCESS,
+                        Payment.Status.PARTIALLY_REFUNDED,
+                        Payment.Status.REFUNDED,
+                    ]
                 )
             ),
-            Decimal('0.00')
+            Decimal("0.00"),
         )
 
     @property
@@ -597,6 +602,13 @@ class Payment(models.Model):
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
+    )
+
+    refunded_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
     )
 
     method = models.CharField(
