@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Invitation
+from .models import CompanyMembership, Invitation, User
 
 
 class InvitationAcceptSerializer(serializers.Serializer):
@@ -31,3 +31,32 @@ class InvitationCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(
         choices=Invitation.Role.choices,
     )
+
+class CompanyMemberUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "profile_photo",
+        ]
+        read_only_fields = fields
+
+class CompanyMembershipSerializer(serializers.ModelSerializer):
+    user = CompanyMemberUserSerializer(read_only=True)
+
+    class Meta:
+        model = CompanyMembership
+
+        fields = [
+            "id",
+            "user",
+            "role",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

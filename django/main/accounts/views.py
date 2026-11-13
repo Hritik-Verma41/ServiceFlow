@@ -4,16 +4,27 @@ from smtplib import SMTPException
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
 from django.shortcuts import get_object_or_404
-from rest_framework import status
+from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from main.companies.models import Company
 from .emails import send_company_invitation_email
-from .models import CompanyMembership, Invitation, User
-from .permissions import IsCompanyAdminOrManager
-from .serializers import InvitationAcceptSerializer, InvitationCreateSerializer
+from .models import (
+    CompanyMembership,
+    Invitation,
+    User
+)
+from .permissions import (
+    IsActiveCompanyMember,
+    IsCompanyAdminOrManager
+)
+from .serializers import (
+    CompanyMembershipSerializer,
+    InvitationAcceptSerializer,
+    InvitationCreateSerializer
+)
 from .services import (
     InvitationAcceptanceError,
     InvalidInvitationError,
@@ -239,4 +250,27 @@ class InvitationAcceptView(APIView):
                 },
             },
             status=status.HTTP_200_OK,
+        )
+
+class CompanyMemberListView(generics.ListAPIView):
+    serializer_class = CompanyMembershipSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_queryset(self):
+        return (
+            CompanyMembership.objects
+            .filter(company=self.get_company())
+            .select_related("user")
+            .order_by(
+                "user__first_name",
+                "user__last_name",
+                "user__email",
+            )
         )
