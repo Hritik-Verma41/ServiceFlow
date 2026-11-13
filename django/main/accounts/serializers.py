@@ -60,3 +60,8 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+class CompanyMemberRoleUpdateSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(
+        choices=CompanyMembership.Role.choices,
+    )

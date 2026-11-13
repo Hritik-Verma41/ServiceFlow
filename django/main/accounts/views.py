@@ -21,6 +21,7 @@ from .permissions import (
     IsCompanyAdminOrManager
 )
 from .serializers import (
+    CompanyMemberRoleUpdateSerializer,
     CompanyMembershipSerializer,
     InvitationAcceptSerializer,
     InvitationCreateSerializer
@@ -273,4 +274,106 @@ class CompanyMemberListView(generics.ListAPIView):
                 "user__last_name",
                 "user__email",
             )
+        )
+
+class CompanyMemberRoleUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def patch(self, request, company_id, membership_id):
+        serializer = CompanyMemberRoleUpdateSerializer(
+            data=request.data
+        )
+        serializer.is_valid(raise_exception=True)
+
+        new_role = serializer.validated_data["role"]
+
+        with transaction.atomic():
+            # Serialize role change within this company.
+            company = get_object_or_404(
+                Company.objects.select_for_update(),
+                id=company_id,
+                is_active=True,
+            )
+
+            actor_membership = None
+
+            if not request.user.is_superuser:
+                actor_membership = (
+                    CompanyMembership.objects
+                    .select_for_update()
+                    .filter(
+                        user=request.user,
+                        company=company,
+                        status=CompanyMembership.Status.ACTIVE,
+                    )
+                    .first()
+                )
+
+                if actor_membership is None:
+                    return Response(
+                        {"detail": "You do not have access to this company."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            membership = get_object_or_404(
+                CompanyMembership.objects.select_for_update(),
+                id=membership_id,
+                company=company,
+                status=CompanyMembership.Status.ACTIVE,
+            )
+
+            is_manager = (
+                actor_membership is not None
+                and actor_membership.role == CompanyMembership.Role.MANAGER
+            )
+
+            if is_manager:
+                if (
+                    membership.role == CompanyMembership.Role.COMPANY_ADMIN
+                    and new_role != membership.role
+                ):
+                    return Response(
+                        {"detail": "Managers cannot change a company admin's role."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                if (
+                    new_role == CompanyMembership.Role.COMPANY_ADMIN
+                    and membership.role != CompanyMembership.Role.COMPANY_ADMIN
+                ):
+                    return Response(
+                        {"detail": "Managers cannot promote members to company admin."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            # Prevent the company from losing its last active admin.
+            if (
+                membership.role == CompanyMembership.Role.COMPANY_ADMIN
+                and new_role != CompanyMembership.Role.COMPANY_ADMIN
+            ):
+                active_admin_count = CompanyMembership.objects.filter(
+                    company=company,
+                    role=CompanyMembership.Role.COMPANY_ADMIN,
+                    status=CompanyMembership.Status.ACTIVE,
+                ).count()
+
+                if active_admin_count <= 1:
+                    return Response(
+                        {"detail": "The last active company admin cannot be demoted."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            membership.role = new_role
+            membership.save(update_fields=["role", "updated_at"])
+
+        return Response(
+            CompanyMembershipSerializer(membership).data,
+            status=status.HTTP_200_OK,
         )
