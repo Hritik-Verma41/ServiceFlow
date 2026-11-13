@@ -2,6 +2,7 @@ import { AuthGuard } from "./components/auth-guard";
 import Image from "next/image";
 import { LogoutButton } from "./components/logout-button";
 import { MobileNavigation } from "./components/mobile-navigation";
+import { RecentServiceJobs } from "./components/recent-service-jobs";
 import { ThemeToggle } from "./components/theme-toggle";
 
 const stats = [
@@ -174,74 +175,7 @@ export default function Home() {
             </section>
 
             {/* Recent Service Jobs */}
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-5 dark:border-slate-800">
-                <div>
-                  <h3 className="font-semibold">
-                    Recent Service Jobs
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    A snapshot of your latest service activity.
-                  </p>
-                </div>
-
-                <button className="text-sm font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
-                  View all jobs →
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800/70 dark:text-slate-400">
-                    <tr>
-                      <th className="px-5 py-4 font-medium">Job ID</th>
-                      <th className="px-5 py-4 font-medium">Customer</th>
-                      <th className="px-5 py-4 font-medium">Service</th>
-                      <th className="px-5 py-4 font-medium">Technician</th>
-                      <th className="px-5 py-4 font-medium">Date</th>
-                      <th className="px-5 py-4 font-medium">Status</th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {jobs.map((job) => (
-                      <tr
-                        key={job.id}
-                        className="transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                      >
-                        <td className="whitespace-nowrap px-5 py-4 font-medium text-blue-600 dark:text-blue-400">
-                          {job.id}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 font-medium">
-                          {job.customer}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
-                          {job.service}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
-                          {job.technician}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-slate-600 dark:text-slate-300">
-                          {job.date}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4">
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${job.status === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                              : job.status === "In Progress"
-                                ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                              }`}
-                          >
-                            {job.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <RecentServiceJobs />
           </div>
         </main>
       </div>
