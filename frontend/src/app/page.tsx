@@ -4,6 +4,7 @@ import Image from "next/image";
 import { JobStatusBreakdown } from "./components/job-status-breakdown";
 import { LogoutButton } from "./components/logout-button";
 import { MobileNavigation } from "./components/mobile-navigation";
+import { RecentActivityFeed } from "./components/recent-activity-feed";
 import { RecentServiceJobs } from "./components/recent-service-jobs";
 import { ThemeToggle } from "./components/theme-toggle";
 
@@ -140,6 +141,9 @@ export default function Home() {
 
             {/* Job Status Breakdown */}
             <JobStatusBreakdown />
+
+            {/* Recent Activity Feed */}
+            <RecentActivityFeed />
 
             {/* Recent Service Jobs */}
             <RecentServiceJobs />

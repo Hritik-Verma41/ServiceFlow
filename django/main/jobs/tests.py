@@ -23,6 +23,7 @@ from main.companies.models import (
     CustomerAddress,
 )
 from main.jobs.models import (
+    ActivityLog,
     Invoice,
     InvoiceItem,
     JobNote,
@@ -1062,6 +1063,26 @@ class ServiceJobAPITests(TestCase):
         self.assertEqual(job.labor_hours, Decimal("0"))
         self.assertEqual(job.labor_rate, Decimal("0"))
 
+        activity = ActivityLog.objects.get(
+            company=self.company,
+            job=job,
+            event_type=ActivityLog.EventType.JOB_CREATED,
+        )
+
+        self.assertEqual(activity.actor, self.admin)
+        self.assertEqual(
+            activity.metadata["job_title"],
+            "New Service Job",
+        )
+        self.assertEqual(
+            activity.metadata["status"],
+            ServiceJob.Status.NEW,
+        )
+        self.assertEqual(
+            activity.metadata["priority"],
+            ServiceJob.Priority.HIGH,
+        )
+
     def test_request_cannot_override_company_during_creation(self):
         self.client.force_authenticate(user=self.admin)
 
@@ -1364,6 +1385,16 @@ class ServiceJobStatusAPITests(TestCase):
 
         job.refresh_from_db()
         self.assertEqual(job.status, ServiceJob.Status.SCHEDULED)
+
+        activity = ActivityLog.objects.get(
+            company=self.company,
+            job=job,
+            event_type=ActivityLog.EventType.JOB_STATUS_CHANGED,
+        )
+
+        self.assertEqual(activity.actor, self.admin)
+        self.assertEqual(activity.metadata["old_status"], "NEW")
+        self.assertEqual(activity.metadata["new_status"], "SCHEDULED")
 
     def test_manager_can_cancel_scheduled_job(self):
         job = self.create_job(ServiceJob.Status.SCHEDULED)

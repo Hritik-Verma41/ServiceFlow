@@ -667,3 +667,65 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.invoice.invoice_number} - {self.amount}"
+
+class ActivityLog(models.Model):
+
+    class EventType(models.TextChoices):
+        JOB_CREATED = "JOB_CREATED", "Job Created"
+        JOB_STATUS_CHANGED = "JOB_STATUS_CHANGED", "Job Status Changed"
+        TECHNICIAN_ASSIGNED = "TECHNICIAN_ASSIGNED", "Technician Assigned"
+        NOTE_ADDED = "NOTE_ADDED", "Job Note Added"
+        INVOICE_CREATED = "INVOICE_CREATED", "Invoice Created"
+        PAYMENT_RECEIVED = "PAYMENT_RECEIVED", "Payment Received"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.CASCADE,
+        related_name="activity_logs",
+    )
+
+    job = models.ForeignKey(
+        ServiceJob,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_logs",
+    )
+
+    actor = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_logs",
+    )
+
+    event_type = models.CharField(
+        max_length=30,
+        choices=EventType.choices,
+    )
+
+    description = models.CharField(
+        max_length=255,
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.company}"

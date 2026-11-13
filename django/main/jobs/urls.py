@@ -7,6 +7,7 @@ from main.jobs.payment_views import (
     razorpay_webhook,
 )
 from main.jobs.views import (
+    CompanyActivityListView,
     CompanyCollectedRevenueView,
     CompanyInvoiceDetailView,
     CompanyInvoiceListCreateView,
@@ -41,6 +42,11 @@ urlpatterns = [
         "payments/webhook/",
         razorpay_webhook,
         name="razorpay-webhook",
+    ),
+    path(
+        "companies/<uuid:company_id>/activities/",
+        CompanyActivityListView.as_view(),
+        name="company-activity-list",
     ),
     path(
         "companies/<uuid:company_id>/jobs/",

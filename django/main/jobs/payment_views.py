@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from main.accounts.models import CompanyMembership
-from main.jobs.models import Invoice, Payment
+from main.jobs.models import ActivityLog, Invoice, Payment
 from main.jobs.payments import CreatePaymentOrderSerializer, VerifyRazorpayPaymentSerializer
 from main.jobs.services.razorpay_service import RazorpayService
 
@@ -273,6 +273,23 @@ class VerifyRazorpayPaymentView(APIView):
             )
 
             locked_payment.invoice.update_payment_status()
+
+            ActivityLog.objects.create(
+                company=locked_payment.invoice.company,
+                job=locked_payment.invoice.job,
+                actor=request.user,
+                event_type=ActivityLog.EventType.PAYMENT_RECEIVED,
+                description=(
+                    f"Payment received for invoice "
+                    f"{locked_payment.invoice.invoice_number}"
+                ),
+                metadata={
+                    "payment_id": str(locked_payment.id),
+                    "invoice_id": str(locked_payment.invoice_id),
+                    "amount": str(locked_payment.amount),
+                    "currency": "INR",
+                },
+            )
         
         return Response({
             "detail": "Payment verified successfully.",
@@ -470,5 +487,24 @@ def razorpay_webhook(request):
         )
 
         payment.invoice.update_payment_status()
+
+        ActivityLog.objects.create(
+            company=payment.invoice.company,
+            job=payment.invoice.job,
+            actor=None,
+            event_type=ActivityLog.EventType.PAYMENT_RECEIVED,
+            description=(
+                f"Payment received for invoice "
+                f"{payment.invoice.invoice_number}"
+            ),
+            metadata={
+                "payment_id": str(payment.id),
+                "invoice_id": str(payment.invoice_id),
+                "gateway_payment_id": gateway_payment_id,
+                "amount": str(payment.amount),
+                "currency": "INR",
+                "source": "razorpay_webhook",
+            },
+        )
 
     return JsonResponse({"status": "processed"})

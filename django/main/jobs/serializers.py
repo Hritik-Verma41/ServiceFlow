@@ -7,6 +7,7 @@ from main.accounts.models import CompanyMembership, User
 from main.companies.models import Customer, CustomerAddress
 
 from .models import (
+    ActivityLog,
     Invoice,
     InvoiceItem,
     JobNote,
@@ -361,3 +362,25 @@ class InvoiceUpdateSerializer(serializers.ModelSerializer):
             "discount_amount",
             "notes",
         ]
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ActivityLog
+        fields = [
+            "id",
+            "event_type",
+            "description",
+            "job",
+            "actor_name",
+            "created_at",
+            "metadata",
+        ]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        if obj.actor is None:
+            return "System"
+
+        return obj.actor.get_full_name() or "Team member"

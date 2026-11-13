@@ -18,6 +18,7 @@ from main.accounts.permissions import (
 from main.companies.models import Company
 
 from .models import (
+    ActivityLog,
     Invoice,
     InvoiceItem,
     JobNote,
@@ -28,6 +29,7 @@ from .models import (
     StockMovement,
 )
 from .serializers import (
+    ActivityLogSerializer,
     InvoiceCreateSerializer,
     InvoiceSerializer,
     InvoiceUpdateSerializer,
@@ -89,7 +91,22 @@ class CompanyServiceJobListCreateView(generics.ListCreateAPIView):
         return queryset.order_by("-created_at")
 
     def perform_create(self, serializer):
-        serializer.save(company=self.get_company())
+        company = self.get_company()
+
+        job = serializer.save(company=company)
+
+        ActivityLog.objects.create(
+            company=company,
+            job=job,
+            actor=self.request.user,
+            event_type=ActivityLog.EventType.JOB_CREATED,
+            description=f"Service job created: {job.title}",
+            metadata={
+                "job_title": job.title,
+                "status": job.status,
+                "priority": job.priority,
+            },
+        )
 
 
 class CompanyServiceJobDetailView(generics.RetrieveUpdateAPIView):
@@ -141,6 +158,30 @@ class CompanyServiceJobDetailView(generics.RetrieveUpdateAPIView):
             )
 
         return queryset
+
+    def perform_update(self, serializer):
+        old_technician_id = serializer.instance.assigned_technician_id
+
+        job = serializer.save()
+
+        new_technician_id = job.assigned_technician_id
+
+        if old_technician_id != new_technician_id and new_technician_id:
+            ActivityLog.objects.create(
+                company=job.company,
+                job=job,
+                actor=self.request.user,
+                event_type=ActivityLog.EventType.TECHNICIAN_ASSIGNED,
+                description=(
+                    f"Technician assigned to service job: {job.title}"
+                ),
+                metadata={
+                    "previous_technician_id": (
+                        str(old_technician_id) if old_technician_id else None
+                    ),
+                    "assigned_technician_id": str(new_technician_id),
+                },
+            )
 
 class CompanyServiceJobStatusView(APIView):
     permission_classes = [IsAuthenticated, IsActiveCompanyMember]
@@ -253,15 +294,32 @@ class CompanyServiceJobStatusView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+        old_status = job.status
+
         job.status = target_status
 
         if target_status == ServiceJob.Status.IN_PROGRESS:
             job.started_at = timezone.now()
 
-        elif target_status == ServiceJob.Status.COMPLETED:
+        if target_status == ServiceJob.Status.COMPLETED:
             job.completed_at = timezone.now()
 
         job.save()
+
+        ActivityLog.objects.create(
+            company=company,
+            job=job,
+            actor=request.user,
+            event_type=ActivityLog.EventType.JOB_STATUS_CHANGED,
+            description=(
+                f"Job status changed from {old_status} "
+                f"to {target_status}: {job.title}"
+            ),
+            metadata={
+                "old_status": old_status,
+                "new_status": target_status,
+            },
+        )
 
         return Response(
             {
@@ -317,9 +375,22 @@ class CompanyServiceJobNoteListCreateView(generics.ListCreateAPIView):
         )
 
     def perform_create(self, serializer):
-        serializer.save(
-            job=self.get_job(),
+        job = self.get_job()
+
+        note = serializer.save(
+            job=job,
             created_by=self.request.user,
+        )
+
+        ActivityLog.objects.create(
+            company=job.company,
+            job=job,
+            actor=self.request.user,
+            event_type=ActivityLog.EventType.NOTE_ADDED,
+            description=f"Note added to service job: {job.title}",
+            metadata={
+                "note_id": str(note.id),
+            },
         )
 
 class CompanyPartListCreateView(generics.ListCreateAPIView):
@@ -664,6 +735,19 @@ class CompanyInvoiceListCreateView(generics.ListCreateAPIView):
                     unit_price=job_part.unit_price,
                 )
 
+            ActivityLog.objects.create(
+                company=job.company,
+                job=job,
+                actor=request.user,
+                event_type=ActivityLog.EventType.INVOICE_CREATED,
+                description=f"Invoice {invoice.invoice_number} created",
+                metadata={
+                    "invoice_id": str(invoice.id),
+                    "invoice_number": invoice.invoice_number,
+                    "total_amount": str(invoice.total_amount),
+                },
+            )
+
         response_serializer = InvoiceSerializer(
             invoice,
             context=self.get_serializer_context()
@@ -789,3 +873,41 @@ class CompanyInvoiceDetailView(generics.RetrieveUpdateAPIView):
         )
 
         return Response(response_serializer.data)
+
+class CompanyActivityListView(generics.ListAPIView):
+    serializer_class = ActivityLogSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_queryset(self):
+        company = self.get_company()
+
+        queryset = ActivityLog.objects.filter(
+            company=company,
+        ).select_related(
+            "actor",
+            "job",
+        )
+
+        if self.request.user.is_superuser:
+            return queryset.order_by("-created_at")[:10]
+
+        membership = get_object_or_404(
+            CompanyMembership,
+            user=self.request.user,
+            company=company,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        if membership.role == CompanyMembership.Role.TECHNICIAN:
+            queryset = queryset.filter(
+                job__assigned_technician=self.request.user,
+            )
+
+        return queryset.order_by("-created_at")[:10]
