@@ -1291,6 +1291,93 @@ class ServiceJobAPITests(TestCase):
         self.assigned_job.refresh_from_db()
         self.assertEqual(self.assigned_job.labor_hours, Decimal("3.00"))
         self.assertEqual(self.assigned_job.labor_rate, Decimal("800.00"))
+    
+    def test_admin_can_retrieve_job_activity_history(self):
+        activity_one = ActivityLog.objects.create(
+            company=self.company,
+            job=self.assigned_job,
+            actor=self.admin,
+            event_type=ActivityLog.EventType.JOB_CREATED,
+            description="Service job created",
+            metadata={"status": "NEW"},
+        )
+
+        activity_two = ActivityLog.objects.create(
+            company=self.company,
+            job=self.assigned_job,
+            actor=self.technician,
+            event_type=ActivityLog.EventType.JOB_STATUS_CHANGED,
+            description="Job started",
+            metadata={
+                "old_status": "SCHEDULED",
+                "new_status": "IN_PROGRESS",
+            },
+        )
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/activities/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(
+            response.data[0]["id"],
+            str(activity_one.id),
+        )
+        self.assertEqual(
+            response.data[1]["id"],
+            str(activity_two.id),
+        )
+        self.assertEqual(
+            response.data[1]["actor_name"],
+            self.technician.get_full_name() or "Team member",
+        )
+
+    def test_assigned_technician_can_retrieve_job_activity(self):
+        ActivityLog.objects.create(
+            company=self.company,
+            job=self.assigned_job,
+            actor=self.admin,
+            event_type=ActivityLog.EventType.JOB_CREATED,
+            description="Service job created",
+            metadata={"status": "NEW"},
+        )
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/activities/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+
+    def test_technician_cannot_retrieve_unassigned_job_activity(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            f"{self.list_url}{self.unassigned_job.id}/activities/"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_company_member_cannot_retrieve_job_activity(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/activities/"
+        )
+
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_unauthenticated_user_cannot_retrieve_job_activity(self):
+        response = self.client.get(
+            f"{self.list_url}{self.assigned_job.id}/activities/"
+        )
+
+        self.assertIn(response.status_code, (401, 403))
 
 class ServiceJobStatusAPITests(TestCase):
     def setUp(self):

@@ -1068,3 +1068,53 @@ class CompanyActivityListView(generics.ListAPIView):
             )
 
         return queryset.order_by("-created_at")[:10]
+
+class CompanyServiceJobActivityListView(generics.ListAPIView):
+    serializer_class = ActivityLogSerializer
+    permission_classes = [IsAuthenticated, IsActiveCompanyMember]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_job(self):
+        company = self.get_company()
+
+        queryset = ServiceJob.objects.filter(
+            company=company,
+        )
+
+        if not self.request.user.is_superuser:
+            membership = get_object_or_404(
+                CompanyMembership,
+                user=self.request.user,
+                company=company,
+                status=CompanyMembership.Status.ACTIVE,
+            )
+
+            if membership.role == CompanyMembership.Role.TECHNICIAN:
+                queryset = queryset.filter(
+                    assigned_technician=self.request.user,
+                )
+
+        return get_object_or_404(
+            queryset,
+            id=self.kwargs["job_id"],
+        )
+
+    def get_queryset(self):
+        job = self.get_job()
+
+        return ActivityLog.objects.filter(
+            company=job.company,
+            job=job,
+        ).select_related(
+            "actor",
+            "job",
+        ).order_by(
+            "created_at",
+            "id",
+        )

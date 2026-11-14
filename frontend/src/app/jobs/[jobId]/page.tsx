@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AuthGuard } from "../../components/auth-guard";
@@ -53,6 +53,16 @@ interface CompanyMember {
     };
     role: string;
     status: string;
+}
+
+interface JobActivity {
+    id: string;
+    event_type: string;
+    description: string;
+    job: string;
+    actor_name: string;
+    created_at: string;
+    metadata: Record<string, unknown>;
 }
 
 function formatLabel(value: string) {
@@ -140,6 +150,40 @@ function priorityClasses(priority: string) {
     }
 }
 
+function activityIcon(eventType: string) {
+    switch (eventType) {
+        case "JOB_CREATED":
+            return "＋";
+        case "JOB_STATUS_CHANGED":
+            return "↻";
+        case "TECHNICIAN_ASSIGNED":
+            return "♙";
+        case "NOTE_ADDED":
+            return "▤";
+        case "INVOICE_CREATED":
+            return "₹";
+        default:
+            return "•";
+    }
+}
+
+function activityColor(eventType: string) {
+    switch (eventType) {
+        case "JOB_CREATED":
+            return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
+        case "JOB_STATUS_CHANGED":
+            return "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300";
+        case "TECHNICIAN_ASSIGNED":
+            return "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
+        case "NOTE_ADDED":
+            return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300";
+        case "INVOICE_CREATED":
+            return "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300";
+        default:
+            return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+    }
+}
+
 function DetailItem({
     label,
     value,
@@ -182,9 +226,56 @@ function JobDetailsContent() {
     const [scheduleSaving, setScheduleSaving] = useState(false);
     const [scheduleError, setScheduleError] = useState("");
 
+    const [activities, setActivities] = useState<JobActivity[]>([]);
+    const [activityLoading, setActivityLoading] = useState(true);
+    const [activityError, setActivityError] = useState("");
+
     const companyId = user?.memberships?.[0]?.company_id;
     const userRole = user?.memberships?.[0]?.role;
     const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+    const fetchActivities = useCallback(async () => {
+        if (!companyId || !apiUrl || !jobId) return;
+
+        setActivityLoading(true);
+        setActivityError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error("Your session has expired. Please log in again.");
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/jobs/${jobId}/activities/`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                    cache: "no-store",
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(data, "Unable to load job activity history.")
+                );
+            }
+
+            setActivities(data);
+        } catch (err) {
+            setActivityError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to load job activity history."
+            );
+        } finally {
+            setActivityLoading(false);
+        }
+    }, [companyId, apiUrl, jobId]);
 
     useEffect(() => {
         if (userLoading || !jobId) return;
@@ -307,6 +398,12 @@ function JobDetailsContent() {
         };
     }, [userLoading, companyId, apiUrl, jobId]);
 
+    useEffect(() => {
+        if (userLoading || !companyId || !apiUrl || !jobId) return;
+
+        fetchActivities();
+    }, [userLoading, companyId, apiUrl, jobId, fetchActivities]);
+
     const isAdminOrManager =
         userRole === "COMPANY_ADMIN" || userRole === "MANAGER";
 
@@ -386,6 +483,8 @@ function JobDetailsContent() {
                     updated_at: new Date().toISOString(),
                 };
             });
+
+            await fetchActivities();
         } catch (err) {
             setStatusError(
                 err instanceof Error
@@ -462,8 +561,6 @@ function JobDetailsContent() {
 
             setJob(updatedJob);
 
-            // Existing SCHEDULED jobs only need their missing dates repaired.
-            // NEW jobs must also transition to SCHEDULED.
             if (job.status === "NEW") {
                 const statusResponse = await fetch(
                     `${apiUrl}/api/companies/${companyId}/jobs/${job.id}/status/`,
@@ -507,6 +604,8 @@ function JobDetailsContent() {
             setScheduleError("");
             setScheduledStart("");
             setScheduledEnd("");
+
+            await fetchActivities();
         } catch (err) {
             setScheduleError(
                 err instanceof Error
@@ -828,6 +927,114 @@ function JobDetailsContent() {
                                         </p>
                                     )}
                                 </div>
+
+                                {/* Job Activity Timeline */}
+                                <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                                                Activity History
+                                            </h2>
+                                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                                A chronological record of events for this job.
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={fetchActivities}
+                                            disabled={activityLoading}
+                                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                        >
+                                            {activityLoading ? "Refreshing..." : "Refresh"}
+                                        </button>
+                                    </div>
+
+                                    {activityError && (
+                                        <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                                            {activityError}
+                                            <button
+                                                type="button"
+                                                onClick={fetchActivities}
+                                                className="ml-2 font-semibold underline"
+                                            >
+                                                Try again
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {activityLoading && activities.length === 0 && (
+                                        <div className="mt-6 flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+                                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600 dark:border-slate-700 dark:border-t-blue-400" />
+                                            Loading activity...
+                                        </div>
+                                    )}
+
+                                    {!activityLoading && !activityError && activities.length === 0 && (
+                                        <div className="mt-6 rounded-xl bg-slate-50 px-4 py-8 text-center dark:bg-slate-950">
+                                            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                                No activity recorded yet
+                                            </p>
+                                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                Job updates and actions will appear here.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {activities.length > 0 && (
+                                        <div className="mt-6">
+                                            {activities.map((activity, index) => (
+                                                <div
+                                                    key={activity.id}
+                                                    className="relative flex gap-4 pb-7 last:pb-0"
+                                                >
+                                                    {index !== activities.length - 1 && (
+                                                        <div className="absolute left-[17px] top-10 h-full w-px bg-slate-200 dark:bg-slate-700" />
+                                                    )}
+
+                                                    <div
+                                                        className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${activityColor(activity.event_type)}`}
+                                                    >
+                                                        {activityIcon(activity.event_type)}
+                                                    </div>
+
+                                                    <div className="min-w-0 flex-1 pt-0.5">
+                                                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                                                {formatLabel(activity.event_type)}
+                                                            </p>
+                                                            <time className="text-xs text-slate-400 dark:text-slate-500">
+                                                                {formatDate(activity.created_at)}
+                                                            </time>
+                                                        </div>
+
+                                                        <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">
+                                                            {activity.description}
+                                                        </p>
+
+                                                        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+                                                            By {activity.actor_name || "System"}
+                                                        </p>
+
+                                                        {activity.event_type === "JOB_STATUS_CHANGED" &&
+                                                            typeof activity.metadata?.old_status === "string" &&
+                                                            typeof activity.metadata?.new_status === "string" && (
+                                                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                                                    <span className={`rounded-full px-2 py-1 font-medium ${statusClasses(activity.metadata.old_status)}`}>
+                                                                        {formatLabel(activity.metadata.old_status)}
+                                                                    </span>
+                                                                    <span className="text-slate-400">→</span>
+                                                                    <span className={`rounded-full px-2 py-1 font-medium ${statusClasses(activity.metadata.new_status)}`}>
+                                                                        {formatLabel(activity.metadata.new_status)}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
                             </section>
 
                             <aside className="space-y-5">
