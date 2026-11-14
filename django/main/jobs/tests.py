@@ -1459,7 +1459,10 @@ class ServiceJobStatusAPITests(TestCase):
         )
 
     def test_admin_can_schedule_new_job(self):
-        job = self.create_job(ServiceJob.Status.NEW)
+        job = self.create_job(
+            ServiceJob.Status.NEW,
+            technician=self.technician,
+        )
         self.client.force_authenticate(user=self.admin)
 
         response = self.client.post(
@@ -1593,6 +1596,23 @@ class ServiceJobStatusAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ServiceJob.Status.NEW)
+
+    def test_admin_cannot_schedule_unassigned_job(self):
+        job = self.create_job(ServiceJob.Status.NEW)
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.get_status_url(job),
+            {"status": ServiceJob.Status.SCHEDULED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("detail", response.data)
+        self.assertIn("Assign a technician", response.data["detail"])
 
         job.refresh_from_db()
         self.assertEqual(job.status, ServiceJob.Status.NEW)

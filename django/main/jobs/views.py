@@ -292,6 +292,20 @@ class CompanyServiceJobStatusView(APIView):
             id=self.kwargs["job_id"],
         )
 
+        if (
+            job.status == ServiceJob.Status.NEW
+            and target_status == ServiceJob.Status.SCHEDULED
+            and not job.assigned_technician_id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Assign a technician before scheduling this job."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         allowed_transitions = {
             ServiceJob.Status.NEW: {
                 ServiceJob.Status.SCHEDULED,

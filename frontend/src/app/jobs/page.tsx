@@ -677,10 +677,20 @@ function JobsContent() {
                                                         {formatLabel(job.priority)}
                                                     </td>
 
-                                                    <td className="px-6 py-4">
-                                                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}>
-                                                            {formatLabel(job.status)}
-                                                        </span>
+                                                    <td className="px-5 py-4">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span
+                                                                className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}
+                                                            >
+                                                                {formatLabel(job.status)}
+                                                            </span>
+
+                                                            {!job.assigned_technician && (
+                                                                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                                                                    Unassigned
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </td>
 
                                                     <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
@@ -711,9 +721,19 @@ function JobsContent() {
                                                 </p>
                                             </div>
 
-                                            <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}>
-                                                {formatLabel(job.status)}
-                                            </span>
+                                            <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                                <span
+                                                    className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}
+                                                >
+                                                    {formatLabel(job.status)}
+                                                </span>
+
+                                                {!job.assigned_technician && (
+                                                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                                                        Unassigned
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
 
                                         <p className="text-sm text-slate-600 dark:text-slate-300">
