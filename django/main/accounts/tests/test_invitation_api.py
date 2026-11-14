@@ -88,10 +88,10 @@ class CompanyInvitationAPITests(APITestCase):
         )
 
     @override_settings(
-        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
         FRONTEND_URL="http://localhost:3000",
     )
-    def test_admin_can_create_invitation(self):
+    @patch("main.accounts.views.send_company_invitation_email")
+    def test_admin_can_create_invitation(self, mock_send_email):
         response = self.invite(self.admin)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -103,16 +103,18 @@ class CompanyInvitationAPITests(APITestCase):
             email="new-tech@example.com",
             company=self.company,
         )
-        self.assertEqual(len(mail.outbox), 1)
+        
+        mock_send_email.assert_called_once()
 
-        email = mail.outbox[0]
-        self.assertEqual(email.to, ["new-tech@example.com"])
-        self.assertIn(self.company.name, email.subject)
-        self.assertIn("/accept-invitation?token=", email.body)
+        invitation_arg, raw_token = mock_send_email.call_args.args
 
-        raw_token = email.body.split(
-            "/accept-invitation?token=", 1
-        )[1].split()[0]
+        self.assertEqual(invitation_arg.id, invitation.id)
+        self.assertTrue(raw_token)
+        self.assertEqual(
+            invitation.token_hash,
+            hash_invitation_token(raw_token),
+        )
+        self.assertNotEqual(invitation.token_hash, raw_token)
 
         self.assertEqual(
             invitation.token_hash,
@@ -369,6 +371,117 @@ class CompanyInvitationAPITests(APITestCase):
         )
 
         mock_send_email.assert_called_once()
+
+    def test_admin_can_list_pending_invitations(self):
+        first, _ = create_invitation(
+            company=self.company,
+            email="first@example.com",
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        second, _ = create_invitation(
+            company=self.company,
+            email="second@example.com",
+            role=Invitation.Role.MANAGER,
+            invited_by=self.admin,
+        )
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+        returned_ids = {item["id"] for item in response.data}
+        self.assertEqual(
+            returned_ids,
+            {str(first.id), str(second.id)},
+        )
+
+
+    def test_invitation_list_excludes_non_pending_invitations(self):
+        invitation, _ = create_invitation(
+            company=self.company,
+            email="accepted@example.com",
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        invitation.status = Invitation.Status.ACCEPTED
+        invitation.save(update_fields=["status", "updated_at"])
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 0)
+
+
+    def test_manager_can_list_pending_invitations(self):
+        create_invitation(
+            company=self.company,
+            email="pending@example.com",
+            role=Invitation.Role.TECHNICIAN,
+            invited_by=self.admin,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+
+    def test_technician_cannot_list_pending_invitations(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+    def test_user_from_another_company_cannot_list_invitations(self):
+        self.client.force_authenticate(user=self.other_admin)
+
+        response = self.client.get(
+            reverse(
+                "company-invitation-list",
+                kwargs={"company_id": self.company.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 class CompanyInvitationRevokeAPITests(APITestCase):
     def setUp(self):

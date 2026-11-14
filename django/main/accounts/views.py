@@ -212,6 +212,38 @@ class CompanyInvitationCreateView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+class CompanyInvitationListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get(self, request, company_id):
+        invitations = (
+            Invitation.objects
+            .filter(
+                company=self.get_company(),
+                status=Invitation.Status.PENDING,
+            )
+            .order_by("-created_at")
+        )
+
+        return Response([
+            {
+                "id": str(invitation.id),
+                "email": invitation.email,
+                "role": invitation.role,
+                "status": invitation.status,
+                "created_at": invitation.created_at,
+                "expires_at": invitation.expires_at,
+            }
+            for invitation in invitations
+        ])
+
 class CompanyInvitationRevokeView(APIView):
     permission_classes = [IsAuthenticated, IsCompanyAdminOrManager]
 

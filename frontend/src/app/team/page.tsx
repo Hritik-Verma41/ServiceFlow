@@ -19,6 +19,15 @@ interface TeamMember {
     updated_at: string;
 }
 
+interface PendingInvitation {
+    id: string;
+    email: string;
+    role: string;
+    status: string;
+    created_at: string;
+    expires_at: string;
+}
+
 interface InvitationResponse {
     id: string;
     email: string;
@@ -31,6 +40,14 @@ function formatRole(role: string) {
         .split("_")
         .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
         .join(" ");
+}
+
+function formatDate(date: string) {
+    return new Date(date).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+    });
 }
 
 function getInitials(member: TeamMember) {
@@ -62,10 +79,10 @@ function TeamContent() {
     const availableInviteRoles =
         currentRole === "COMPANY_ADMIN"
             ? [
-                  { value: "MANAGER", label: "Manager" },
-                  { value: "TECHNICIAN", label: "Technician" },
-                  { value: "COMPANY_ADMIN", label: "Company Admin" },
-              ]
+                { value: "MANAGER", label: "Manager" },
+                { value: "TECHNICIAN", label: "Technician" },
+                { value: "COMPANY_ADMIN", label: "Company Admin" },
+            ]
             : [{ value: "TECHNICIAN", label: "Technician" }];
 
     const [members, setMembers] = useState<TeamMember[]>([]);
@@ -83,6 +100,15 @@ function TeamContent() {
     const [inviting, setInviting] = useState(false);
     const [inviteError, setInviteError] = useState("");
     const [successMessage, setSuccessMessage] = useState("");
+
+    // Pending invitations
+    const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
+    const [invitationsLoading, setInvitationsLoading] = useState(true);
+    const [invitationsError, setInvitationsError] = useState("");
+
+    // Invitation actions
+    const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
+    const [invitationActionError, setInvitationActionError] = useState("");
 
     // Fetch company members
     useEffect(() => {
@@ -150,6 +176,73 @@ function TeamContent() {
         return () => controller.abort();
     }, [companyId, userLoading]);
 
+    // Fetch pending invitations
+    useEffect(() => {
+        if (userLoading) return;
+
+        if (!companyId || !canInvite) {
+            setInvitations([]);
+            setInvitationsLoading(false);
+            return;
+        }
+
+        const controller = new AbortController();
+
+        async function fetchInvitations() {
+            try {
+                setInvitationsLoading(true);
+                setInvitationsError("");
+
+                const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+                const token = sessionStorage.getItem("accessToken");
+
+                if (!apiUrl || !token) {
+                    throw new Error("API configuration or session is missing.");
+                }
+
+                const response = await fetch(
+                    `${apiUrl}/api/companies/${companyId}/invitations/`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                        signal: controller.signal,
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        typeof data.detail === "string"
+                            ? data.detail
+                            : "Unable to load pending invitations."
+                    );
+                }
+
+                setInvitations(data as PendingInvitation[]);
+            } catch (err) {
+                if (err instanceof Error && err.name === "AbortError") {
+                    return;
+                }
+
+                setInvitationsError(
+                    err instanceof Error
+                        ? err.message
+                        : "Unable to load pending invitations."
+                );
+            } finally {
+                if (!controller.signal.aborted) {
+                    setInvitationsLoading(false);
+                }
+            }
+        }
+
+        fetchInvitations();
+
+        return () => controller.abort();
+    }, [companyId, userLoading, canInvite]);
+
     // Send invitation
     async function handleInviteMember(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -190,10 +283,10 @@ function TeamContent() {
                     typeof data.detail === "string"
                         ? data.detail
                         : typeof data.email === "string"
-                          ? data.email
-                          : typeof data.role === "string"
-                            ? data.role
-                            : "Unable to send the invitation.";
+                            ? data.email
+                            : typeof data.role === "string"
+                                ? data.role
+                                : "Unable to send the invitation.";
 
                 throw new Error(message);
             }
@@ -207,6 +300,29 @@ function TeamContent() {
             setInviteEmail("");
             setInviteRole("TECHNICIAN");
             setShowInviteModal(false);
+
+            // Refresh pending invitations
+            try {
+                const refreshResponse = await fetch(
+                    `${apiUrl}/api/companies/${companyId}/invitations/`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                    }
+                );
+
+                if (refreshResponse.ok) {
+                    const refreshedData: PendingInvitation[] =
+                        await refreshResponse.json();
+
+                    setInvitations(refreshedData);
+                    setInvitationsError("");
+                }
+            } catch {
+                // The invitation was sent successfully.
+                // A later page refresh will reload the invitation list.
+            }
         } catch (err) {
             setInviteError(
                 err instanceof Error
@@ -215,6 +331,133 @@ function TeamContent() {
             );
         } finally {
             setInviting(false);
+        }
+    }
+
+    // Resend invitation
+    async function handleResendInvitation(invitationId: string) {
+        if (!companyId || invitationActionId !== null) return;
+
+        try {
+            setInvitationActionId(invitationId);
+            setInvitationActionError("");
+            setSuccessMessage("");
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!apiUrl || !token) {
+                throw new Error("API configuration or session is missing.");
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/invitations/${invitationId}/resend/`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    typeof data.detail === "string"
+                        ? data.detail
+                        : "Unable to resend invitation."
+                );
+            }
+
+            setInvitations((current) =>
+                current.map((invitation) =>
+                    invitation.id === invitationId
+                        ? {
+                            ...invitation,
+                            expires_at: data.expires_at,
+                        }
+                        : invitation
+                )
+            );
+
+            setSuccessMessage(
+                `Invitation email resent to ${data.email}.`
+            );
+        } catch (err) {
+            setInvitationActionError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to resend invitation."
+            );
+        } finally {
+            setInvitationActionId(null);
+        }
+    }
+
+    // Revoke invitation
+    async function handleRevokeInvitation(invitationId: string) {
+        if (!companyId || invitationActionId !== null) return;
+
+        const invitation = invitations.find(
+            (item) => item.id === invitationId
+        );
+
+        if (!invitation) return;
+
+        const confirmed = window.confirm(
+            `Are you sure you want to revoke the invitation sent to ${invitation.email}?`
+        );
+
+        if (!confirmed) return;
+
+        try {
+            setInvitationActionId(invitationId);
+            setInvitationActionError("");
+            setSuccessMessage("");
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!apiUrl || !token) {
+                throw new Error("API configuration or session is missing.");
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/invitations/${invitationId}/`,
+                {
+                    method: "DELETE",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    typeof data.detail === "string"
+                        ? data.detail
+                        : "Unable to revoke invitation."
+                );
+            }
+
+            setInvitations((current) =>
+                current.filter((item) => item.id !== invitationId)
+            );
+
+            setSuccessMessage(
+                `Invitation to ${invitation.email} was revoked.`
+            );
+        } catch (err) {
+            setInvitationActionError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to revoke invitation."
+            );
+        } finally {
+            setInvitationActionId(null);
         }
     }
 
@@ -331,7 +574,169 @@ function TeamContent() {
                     </div>
                 </section>
 
-                {/* Members section */}
+                {/* Pending Invitations */}
+                {canInvite && (
+                    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                        <div className="border-b border-slate-200 p-5 dark:border-slate-800">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                    <h2 className="font-semibold">
+                                        Pending Invitations
+                                    </h2>
+
+                                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                        Invitations waiting to be accepted.
+                                    </p>
+                                </div>
+
+                                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+                                    {invitationsLoading
+                                        ? "—"
+                                        : invitations.length}{" "}
+                                    pending
+                                </span>
+                            </div>
+                        </div>
+
+                        {invitationActionError && (
+                            <div className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+                                {invitationActionError}
+                            </div>
+                        )}
+
+                        {invitationsLoading && (
+                            <div className="flex h-32 items-center justify-center text-sm text-slate-400">
+                                Loading pending invitations...
+                            </div>
+                        )}
+
+                        {!invitationsLoading && invitationsError && (
+                            <div className="flex h-32 items-center justify-center px-5 text-center text-sm text-red-500">
+                                {invitationsError}
+                            </div>
+                        )}
+
+                        {!invitationsLoading &&
+                            !invitationsError &&
+                            invitations.length === 0 && (
+                                <div className="flex h-32 flex-col items-center justify-center gap-1 px-5 text-center">
+                                    <p className="font-medium">
+                                        No pending invitations
+                                    </p>
+
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                                        Invitations you send will appear here.
+                                    </p>
+                                </div>
+                            )}
+
+                        {!invitationsLoading &&
+                            !invitationsError &&
+                            invitations.length > 0 && (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[900px] text-left text-sm">
+                                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
+                                            <tr>
+                                                <th className="px-5 py-4 font-medium">
+                                                    Email
+                                                </th>
+
+                                                <th className="px-5 py-4 font-medium">
+                                                    Role
+                                                </th>
+
+                                                <th className="px-5 py-4 font-medium">
+                                                    Sent
+                                                </th>
+
+                                                <th className="px-5 py-4 font-medium">
+                                                    Expires
+                                                </th>
+
+                                                <th className="px-5 py-4 text-right font-medium">
+                                                    Status
+                                                </th>
+
+                                                <th className="px-5 py-4 text-right font-medium">
+                                                    Actions
+                                                </th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {invitations.map((invitation) => (
+                                                <tr
+                                                    key={invitation.id}
+                                                    className="transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                                                >
+                                                    <td className="px-5 py-4 font-medium">
+                                                        {invitation.email}
+                                                    </td>
+
+                                                    <td className="px-5 py-4">
+                                                        {formatRole(invitation.role)}
+                                                    </td>
+
+                                                    <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                                                        {formatDate(invitation.created_at)}
+                                                    </td>
+
+                                                    <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                                                        {formatDate(invitation.expires_at)}
+                                                    </td>
+
+                                                    <td className="px-5 py-4 text-right">
+                                                        <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+                                                            Pending
+                                                        </span>
+                                                    </td>
+
+                                                    <td className="px-5 py-4">
+                                                        <div className="flex justify-end gap-2">
+                                                            <button
+                                                                onClick={() =>
+                                                                    handleResendInvitation(
+                                                                        invitation.id
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    invitationActionId !==
+                                                                    null
+                                                                }
+                                                                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                                                            >
+                                                                {invitationActionId ===
+                                                                    invitation.id
+                                                                    ? "Processing..."
+                                                                    : "Resend"}
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() =>
+                                                                    handleRevokeInvitation(
+                                                                        invitation.id
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    invitationActionId !==
+                                                                    null
+                                                                }
+                                                                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40"
+                                                            >
+                                                                Revoke
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                    </section>
+                )}
+
+                {/* Company Members */}
                 <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
                     {/* Section header and actions */}
                     <div className="flex flex-col gap-4 border-b border-slate-200 p-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
@@ -488,13 +893,12 @@ function TeamContent() {
 
                                             <td className="px-5 py-4">
                                                 <span
-                                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                                        member.status === "ACTIVE"
-                                                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-                                                            : member.status === "SUSPENDED"
-                                                              ? "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400"
-                                                              : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
-                                                    }`}
+                                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${member.status === "ACTIVE"
+                                                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
+                                                        : member.status === "SUSPENDED"
+                                                            ? "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400"
+                                                            : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
+                                                        }`}
                                                 >
                                                     {member.status.charAt(0) +
                                                         member.status
@@ -504,13 +908,7 @@ function TeamContent() {
                                             </td>
 
                                             <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
-                                                {new Date(
-                                                    member.created_at
-                                                ).toLocaleDateString("en-IN", {
-                                                    day: "numeric",
-                                                    month: "short",
-                                                    year: "numeric",
-                                                })}
+                                                {formatDate(member.created_at)}
                                             </td>
                                         </tr>
                                     ))}
@@ -616,9 +1014,7 @@ function TeamContent() {
                                 <button
                                     type="button"
                                     disabled={inviting}
-                                    onClick={() =>
-                                        setShowInviteModal(false)
-                                    }
+                                    onClick={() => setShowInviteModal(false)}
                                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
                                 >
                                     Cancel
