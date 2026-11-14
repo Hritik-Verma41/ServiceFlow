@@ -8,7 +8,7 @@ const navigation = [
   { icon: "⌂", label: "Overview", href: "/" },
   { icon: "▤", label: "Service Jobs", href: "#" },
   { icon: "♙", label: "Customers", href: "#" },
-  { icon: "⚙", label: "Technicians", href: "#" },
+  { icon: "⚙", label: "Team", href: "/team" },
   { icon: "▦", label: "Inventory", href: "#" },
   { icon: "₹", label: "Invoices", href: "#" },
 ];

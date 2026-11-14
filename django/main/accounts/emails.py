@@ -1,10 +1,21 @@
+import requests
+
 from django.conf import settings
-from django.core.mail import send_mail
 from django.utils import timezone
 
 
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
+
+
 def send_company_invitation_email(invitation, raw_token):
-    """Send an invitation email to a prospective company member."""
+    """Send a company invitation using Brevo's transactional email API."""
+
+    if not settings.BREVO_API_KEY:
+        raise RuntimeError("BREVO_API_KEY is not configured.")
+
+    if not settings.BREVO_SENDER_EMAIL:
+        raise RuntimeError("BREVO_SENDER_EMAIL is not configured.")
+
     acceptance_url = (
         f"{settings.FRONTEND_URL.rstrip('/')}"
         f"/accept-invitation?token={raw_token}"
@@ -26,10 +37,37 @@ def send_company_invitation_email(invitation, raw_token):
         "If you weren't expecting this invitation, you can ignore this email."
     )
 
-    return send_mail(
-        subject=subject,
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[invitation.email],
-        fail_silently=False,
+    payload = {
+        "sender": {
+            "name": settings.BREVO_SENDER_NAME,
+            "email": settings.BREVO_SENDER_EMAIL,
+        },
+        "to": [
+            {
+                "email": invitation.email,
+            }
+        ],
+        "subject": subject,
+        "textContent": message,
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": settings.BREVO_API_KEY,
+        "content-type": "application/json",
+    }
+
+    response = requests.post(
+        BREVO_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=20,
     )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Brevo email delivery failed "
+            f"(HTTP {response.status_code}): {response.text}"
+        )
+
+    return response.json()

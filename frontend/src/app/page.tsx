@@ -18,12 +18,12 @@ import {
 } from "./components/date-range-selector";
 
 const navigation = [
-  { icon: "⌂", label: "Overview" },
-  { icon: "▤", label: "Service Jobs" },
-  { icon: "♙", label: "Customers" },
-  { icon: "⚙", label: "Technicians" },
-  { icon: "▦", label: "Inventory" },
-  { icon: "₹", label: "Invoices" },
+  { icon: "⌂", label: "Overview", href: "/" },
+  { icon: "▤", label: "Service Jobs", href: "#" },
+  { icon: "♙", label: "Customers", href: "#" },
+  { icon: "⚙", label: "Team", href: "/team" },
+  { icon: "▦", label: "Inventory", href: "#" },
+  { icon: "₹", label: "Invoices", href: "#" },
 ];
 
 function getDefaultDateRange(): DashboardDateRange {
@@ -127,7 +127,7 @@ function DashboardContent() {
             {navigation.map((item, index) => (
               <a
                 key={item.label}
-                href="#"
+                href={item.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition ${index === 0
                     ? "bg-blue-600 font-medium text-white"
                     : "text-slate-400 hover:bg-white/5 hover:text-white"
