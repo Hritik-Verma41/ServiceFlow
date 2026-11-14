@@ -627,6 +627,7 @@ function JobsContent() {
                         </div>
                     ) : (
                         <>
+                            {/* Desktop table */}
                             <div className="hidden overflow-x-auto md:block">
                                 <table className="w-full text-left">
                                     <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
@@ -639,6 +640,7 @@ function JobsContent() {
                                             <th className="px-6 py-4 font-semibold">Technician</th>
                                         </tr>
                                     </thead>
+
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                         {filteredJobs.map((job) => {
                                             const assignedTechnician = technicians.find(
@@ -652,27 +654,35 @@ function JobsContent() {
                                                     className="transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
                                                 >
                                                     <td className="px-6 py-4">
-                                                        <p className="font-semibold text-slate-900 dark:text-white">
+                                                        <Link
+                                                            href={`/jobs/${job.id}`}
+                                                            className="font-semibold text-slate-900 transition hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
+                                                        >
                                                             {job.title}
-                                                        </p>
+                                                        </Link>
                                                         <p className="mt-1 text-xs text-slate-500">
                                                             #{job.id.slice(0, 8)}
                                                         </p>
                                                     </td>
+
                                                     <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
                                                         {customerNames.get(job.customer) || "Unknown customer"}
                                                     </td>
+
                                                     <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
                                                         {formatDate(job.scheduled_start)}
                                                     </td>
+
                                                     <td className={`px-6 py-4 text-sm font-semibold ${priorityClasses(job.priority)}`}>
                                                         {formatLabel(job.priority)}
                                                     </td>
+
                                                     <td className="px-6 py-4">
                                                         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}>
                                                             {formatLabel(job.status)}
                                                         </span>
                                                     </td>
+
                                                     <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
                                                         {assignedTechnician?.name ||
                                                             (job.assigned_technician ? "Assigned" : "Unassigned")}
@@ -684,18 +694,23 @@ function JobsContent() {
                                 </table>
                             </div>
 
+                            {/* Mobile cards */}
                             <div className="divide-y divide-slate-100 dark:divide-slate-800 md:hidden">
                                 {filteredJobs.map((job) => (
                                     <div key={job.id} className="space-y-3 p-4">
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <p className="font-semibold text-slate-900 dark:text-white">
+                                                <Link
+                                                    href={`/jobs/${job.id}`}
+                                                    className="font-semibold text-slate-900 transition hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
+                                                >
                                                     {job.title}
-                                                </p>
+                                                </Link>
                                                 <p className="mt-1 text-xs text-slate-500">
                                                     #{job.id.slice(0, 8)}
                                                 </p>
                                             </div>
+
                                             <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(job.status)}`}>
                                                 {formatLabel(job.status)}
                                             </span>
@@ -770,6 +785,7 @@ function JobsContent() {
                                     <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                         Customer <span className="text-red-500">*</span>
                                     </label>
+
                                     <select
                                         required
                                         value={selectedCustomerId}
@@ -833,7 +849,7 @@ function JobsContent() {
                                         !addressError &&
                                         addresses.length === 0 && (
                                             <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                                                No service addresses found for this customer. Add an address before creating the job.
+                                                No service addresses found for this customer. Add an address before creating a job.
                                             </p>
                                         )}
                                 </div>
@@ -842,6 +858,7 @@ function JobsContent() {
                                     <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                         Job Title <span className="text-red-500">*</span>
                                     </label>
+
                                     <input
                                         required
                                         type="text"
@@ -857,6 +874,7 @@ function JobsContent() {
                                     <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                         Description
                                     </label>
+
                                     <textarea
                                         rows={3}
                                         value={description}
@@ -871,6 +889,7 @@ function JobsContent() {
                                         <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                             Priority
                                         </label>
+
                                         <select
                                             value={priority}
                                             onChange={(event) => setPriority(event.target.value)}
@@ -888,6 +907,7 @@ function JobsContent() {
                                         <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                             Assign Technician
                                         </label>
+
                                         <select
                                             value={technicianId}
                                             onChange={(event) => setTechnicianId(event.target.value)}
@@ -914,6 +934,7 @@ function JobsContent() {
                                         <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                             Scheduled Start
                                         </label>
+
                                         <input
                                             type="datetime-local"
                                             value={scheduledStart}
@@ -926,6 +947,7 @@ function JobsContent() {
                                         <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                                             Scheduled End
                                         </label>
+
                                         <input
                                             type="datetime-local"
                                             min={scheduledStart || undefined}
