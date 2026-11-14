@@ -56,6 +56,13 @@ interface CompanyMember {
     status: string;
 }
 
+interface TechnicianWorkload {
+    technician_id: string;
+    name: string;
+    email: string;
+    open_job_count: number;
+}
+
 interface JobActivity {
     id: string;
     event_type: string;
@@ -219,6 +226,12 @@ function JobDetailsContent() {
     const [technicians, setTechnicians] = useState<CompanyMember[]>([]);
     const [selectedTechnician, setSelectedTechnician] = useState("");
 
+    const [technicianWorkloads, setTechnicianWorkloads] = useState<
+        TechnicianWorkload[]
+    >([]);
+    const [workloadLoading, setWorkloadLoading] = useState(false);
+    const [workloadError, setWorkloadError] = useState("");
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -248,7 +261,9 @@ function JobDetailsContent() {
             const token = sessionStorage.getItem("accessToken");
 
             if (!token) {
-                throw new Error("Your session has expired. Please log in again.");
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
             }
 
             const response = await fetch(
@@ -285,6 +300,55 @@ function JobDetailsContent() {
             setActivityLoading(false);
         }
     }, [companyId, apiUrl, jobId]);
+
+    const fetchTechnicianWorkload = useCallback(async () => {
+        if (!companyId || !apiUrl) return;
+
+        setWorkloadLoading(true);
+        setWorkloadError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/technician-workload/`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(
+                        data,
+                        "Unable to load technician workloads."
+                    )
+                );
+            }
+
+            setTechnicianWorkloads(
+                Array.isArray(data.results) ? data.results : []
+            );
+        } catch (err) {
+            setWorkloadError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to load technician workloads."
+            );
+        } finally {
+            setWorkloadLoading(false);
+        }
+    }, [companyId, apiUrl]);
 
     useEffect(() => {
         if (userLoading || !companyId || !apiUrl || !jobId) return;
@@ -399,7 +463,7 @@ function JobDetailsContent() {
 
                 const technician = matchedTechnician
                     ? `${matchedTechnician.user.first_name} ${matchedTechnician.user.last_name}`.trim() ||
-                      matchedTechnician.user.email
+                    matchedTechnician.user.email
                     : "Unassigned";
 
                 if (active) {
@@ -444,6 +508,25 @@ function JobDetailsContent() {
         fetchActivities();
     }, [userLoading, companyId, apiUrl, jobId, fetchActivities]);
 
+    useEffect(() => {
+        if (
+            userLoading ||
+            !companyId ||
+            !apiUrl ||
+            (userRole !== "COMPANY_ADMIN" && userRole !== "MANAGER")
+        ) {
+            return;
+        }
+
+        fetchTechnicianWorkload();
+    }, [
+        userLoading,
+        companyId,
+        apiUrl,
+        userRole,
+        fetchTechnicianWorkload,
+    ]);
+
     const isAdminOrManager =
         userRole === "COMPANY_ADMIN" || userRole === "MANAGER";
 
@@ -477,7 +560,9 @@ function JobDetailsContent() {
 
         if (
             targetStatus === "CANCELLED" &&
-            !window.confirm("Are you sure you want to cancel this service job?")
+            !window.confirm(
+                "Are you sure you want to cancel this service job?"
+            )
         ) {
             return;
         }
@@ -528,6 +613,7 @@ function JobDetailsContent() {
             });
 
             await fetchActivities();
+            await fetchTechnicianWorkload();
         } catch (err) {
             setStatusError(
                 err instanceof Error
@@ -676,6 +762,7 @@ function JobDetailsContent() {
 
             setShowScheduleForm(false);
             await fetchActivities();
+            await fetchTechnicianWorkload();
         } catch (err) {
             setScheduleError(
                 err instanceof Error
@@ -745,7 +832,7 @@ function JobDetailsContent() {
 
             const name = matchedTechnician
                 ? `${matchedTechnician.user.first_name} ${matchedTechnician.user.last_name}`.trim() ||
-                  matchedTechnician.user.email
+                matchedTechnician.user.email
                 : "Assigned technician";
 
             setJob((previous) =>
@@ -761,6 +848,7 @@ function JobDetailsContent() {
             setTechnicianName(name);
 
             await fetchActivities();
+            await fetchTechnicianWorkload();
         } catch (err) {
             setAssignmentError(
                 err instanceof Error
@@ -805,6 +893,15 @@ function JobDetailsContent() {
 
     const activeTechnicians = technicians.filter(
         (member) => member.status === "ACTIVE"
+    );
+
+    const sortedTechnicianWorkloads = [...technicianWorkloads].sort(
+        (a, b) => b.open_job_count - a.open_job_count
+    );
+
+    const maxTechnicianWorkload = Math.max(
+        1,
+        ...technicianWorkloads.map((item) => item.open_job_count)
     );
 
     return (
@@ -852,183 +949,183 @@ function JobDetailsContent() {
                     canStart ||
                     canComplete ||
                     canCancel) && (
-                    <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-                        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                            <div>
-                                <h2 className="text-base font-semibold text-slate-900 dark:text-white">
-                                    Job Actions
-                                </h2>
-
-                                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                                    Manage this job based on its current status.
-                                </p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                                {(canSchedule || canRepairSchedule) && (
-                                    <button
-                                        type="button"
-                                        onClick={openScheduleForm}
-                                        disabled={scheduleSaving || statusUpdating}
-                                        className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {canRepairSchedule
-                                            ? "Set Schedule"
-                                            : "Schedule Job"}
-                                    </button>
-                                )}
-
-                                {canStart && (
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateJobStatus("IN_PROGRESS")
-                                        }
-                                        disabled={statusUpdating}
-                                        className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {statusUpdating
-                                            ? "Updating..."
-                                            : "Start Work"}
-                                    </button>
-                                )}
-
-                                {canComplete && (
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateJobStatus("COMPLETED")
-                                        }
-                                        disabled={statusUpdating}
-                                        className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {statusUpdating
-                                            ? "Updating..."
-                                            : "Complete Job"}
-                                    </button>
-                                )}
-
-                                {canCancel && (
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateJobStatus("CANCELLED")
-                                        }
-                                        disabled={statusUpdating || scheduleSaving}
-                                        className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/30"
-                                    >
-                                        {statusUpdating
-                                            ? "Updating..."
-                                            : "Cancel Job"}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {job.status === "NEW" &&
-                            !job.assigned_technician &&
-                            isAdminOrManager && (
-                                <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                                    Assign a technician before scheduling this job.
-                                </p>
-                            )}
-
-                        {showScheduleForm && (
-                            <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
-                                <div className="mb-4">
-                                    <h3 className="font-semibold text-slate-900 dark:text-white">
-                                        {job.status === "NEW"
-                                            ? "Schedule Service Job"
-                                            : "Complete Job Schedule"}
-                                    </h3>
+                        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                                <div>
+                                    <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                                        Job Actions
+                                    </h2>
 
                                     <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                                        Select when this service job is planned to start and finish.
+                                        Manage this job based on its current status.
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                    <div>
-                                        <label
-                                            htmlFor="scheduled-start"
-                                            className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                <div className="flex flex-wrap gap-2">
+                                    {(canSchedule || canRepairSchedule) && (
+                                        <button
+                                            type="button"
+                                            onClick={openScheduleForm}
+                                            disabled={scheduleSaving || statusUpdating}
+                                            className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
-                                            Scheduled Start
-                                        </label>
+                                            {canRepairSchedule
+                                                ? "Set Schedule"
+                                                : "Schedule Job"}
+                                        </button>
+                                    )}
 
-                                        <input
-                                            id="scheduled-start"
-                                            type="datetime-local"
-                                            value={scheduledStart}
-                                            onChange={(event) =>
-                                                setScheduledStart(event.target.value)
+                                    {canStart && (
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                updateJobStatus("IN_PROGRESS")
                                             }
-                                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label
-                                            htmlFor="scheduled-end"
-                                            className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            disabled={statusUpdating}
+                                            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
-                                            Scheduled End
-                                        </label>
+                                            {statusUpdating
+                                                ? "Updating..."
+                                                : "Start Work"}
+                                        </button>
+                                    )}
 
-                                        <input
-                                            id="scheduled-end"
-                                            type="datetime-local"
-                                            value={scheduledEnd}
-                                            onChange={(event) =>
-                                                setScheduledEnd(event.target.value)
+                                    {canComplete && (
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                updateJobStatus("COMPLETED")
                                             }
-                                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                        />
-                                    </div>
+                                            disabled={statusUpdating}
+                                            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {statusUpdating
+                                                ? "Updating..."
+                                                : "Complete Job"}
+                                        </button>
+                                    )}
+
+                                    {canCancel && (
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                updateJobStatus("CANCELLED")
+                                            }
+                                            disabled={statusUpdating || scheduleSaving}
+                                            className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                        >
+                                            {statusUpdating
+                                                ? "Updating..."
+                                                : "Cancel Job"}
+                                        </button>
+                                    )}
                                 </div>
+                            </div>
 
-                                {scheduleError && (
-                                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-                                        {scheduleError}
-                                    </div>
+                            {job.status === "NEW" &&
+                                !job.assigned_technician &&
+                                isAdminOrManager && (
+                                    <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                        Assign a technician before scheduling this job.
+                                    </p>
                                 )}
 
-                                <div className="mt-5 flex flex-wrap justify-end gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setShowScheduleForm(false);
-                                            setScheduleError("");
-                                        }}
-                                        disabled={scheduleSaving}
-                                        className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                                    >
-                                        Close
-                                    </button>
+                            {showScheduleForm && (
+                                <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+                                    <div className="mb-4">
+                                        <h3 className="font-semibold text-slate-900 dark:text-white">
+                                            {job.status === "NEW"
+                                                ? "Schedule Service Job"
+                                                : "Complete Job Schedule"}
+                                        </h3>
 
-                                    <button
-                                        type="button"
-                                        onClick={saveSchedule}
-                                        disabled={scheduleSaving}
-                                        className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {scheduleSaving
-                                            ? "Saving Schedule..."
-                                            : job.status === "NEW"
-                                                ? "Save & Schedule"
-                                                : "Save Schedule"}
-                                    </button>
+                                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                            Select when this service job is planned to start and finish.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                        <div>
+                                            <label
+                                                htmlFor="scheduled-start"
+                                                className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            >
+                                                Scheduled Start
+                                            </label>
+
+                                            <input
+                                                id="scheduled-start"
+                                                type="datetime-local"
+                                                value={scheduledStart}
+                                                onChange={(event) =>
+                                                    setScheduledStart(event.target.value)
+                                                }
+                                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label
+                                                htmlFor="scheduled-end"
+                                                className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            >
+                                                Scheduled End
+                                            </label>
+
+                                            <input
+                                                id="scheduled-end"
+                                                type="datetime-local"
+                                                value={scheduledEnd}
+                                                onChange={(event) =>
+                                                    setScheduledEnd(event.target.value)
+                                                }
+                                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {scheduleError && (
+                                        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                                            {scheduleError}
+                                        </div>
+                                    )}
+
+                                    <div className="mt-5 flex flex-wrap justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowScheduleForm(false);
+                                                setScheduleError("");
+                                            }}
+                                            disabled={scheduleSaving}
+                                            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                        >
+                                            Close
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={saveSchedule}
+                                            disabled={scheduleSaving}
+                                            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {scheduleSaving
+                                                ? "Saving Schedule..."
+                                                : job.status === "NEW"
+                                                    ? "Save & Schedule"
+                                                    : "Save Schedule"}
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {statusError && (
-                            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-                                {statusError}
-                            </div>
-                        )}
-                    </section>
-                )}
+                            {statusError && (
+                                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                                    {statusError}
+                                </div>
+                            )}
+                        </section>
+                    )}
 
                 <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                     <section className="space-y-5 lg:col-span-2">
@@ -1227,10 +1324,10 @@ function JobDetailsContent() {
                                                     "JOB_STATUS_CHANGED" &&
                                                     typeof activity.metadata
                                                         ?.old_status ===
-                                                        "string" &&
+                                                    "string" &&
                                                     typeof activity.metadata
                                                         ?.new_status ===
-                                                        "string" && (
+                                                    "string" && (
                                                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                                                             <span
                                                                 className={`rounded-full px-2 py-1 font-medium ${statusClasses(activity.metadata.old_status)}`}
@@ -1276,87 +1373,209 @@ function JobDetailsContent() {
 
                             {isAdminOrManager && (
                                 <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
-                                    <label
-                                        htmlFor="assigned-technician"
-                                        className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                    >
-                                        {job.assigned_technician
-                                            ? "Change Technician"
-                                            : "Assign Technician"}
-                                    </label>
+                                    <div className="mb-5">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                                Current Technician Workload
+                                            </h3>
 
-                                    <select
-                                        id="assigned-technician"
-                                        value={selectedTechnician}
-                                        onChange={(event) =>
-                                            setSelectedTechnician(
-                                                event.target.value
-                                            )
-                                        }
-                                        disabled={assignmentSaving}
-                                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                                    >
-                                        <option value="">
-                                            Choose a technician
-                                        </option>
+                                            <button
+                                                type="button"
+                                                onClick={fetchTechnicianWorkload}
+                                                disabled={workloadLoading}
+                                                className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50 dark:text-blue-400"
+                                            >
+                                                {workloadLoading
+                                                    ? "Refreshing..."
+                                                    : "Refresh"}
+                                            </button>
+                                        </div>
 
-                                        {technicians
-                                            .filter(
-                                                (member) =>
-                                                    member.status === "ACTIVE" ||
-                                                    member.user.id ===
-                                                        job.assigned_technician
-                                            )
-                                            .map((member) => {
-                                                const name =
-                                                    `${member.user.first_name} ${member.user.last_name}`.trim() ||
-                                                    member.user.email;
-
-                                                return (
-                                                    <option
-                                                        key={member.user.id}
-                                                        value={member.user.id}
-                                                    >
-                                                        {name}
-                                                        {member.status !==
-                                                            "ACTIVE"
-                                                            ? " (Inactive)"
-                                                            : ""}
-                                                    </option>
-                                                );
-                                            })}
-                                    </select>
-
-                                    {activeTechnicians.length === 0 && (
-                                        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                                            No active technicians are available. Activate or invite a technician from Team Management.
+                                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                            Number of active jobs assigned to each technician.
                                         </p>
-                                    )}
 
-                                    {assignmentError && (
-                                        <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-                                            {assignmentError}
+                                        {workloadLoading &&
+                                            technicianWorkloads.length === 0 && (
+                                                <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+                                                    Loading technician workloads...
+                                                </p>
+                                            )}
+
+                                        {workloadError && (
+                                            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                                                {workloadError}
+                                            </div>
+                                        )}
+
+                                        {!workloadLoading &&
+                                            !workloadError &&
+                                            technicianWorkloads.length === 0 && (
+                                                <p className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                                                    No active technicians found.
+                                                </p>
+                                            )}
+
+                                        {sortedTechnicianWorkloads.length > 0 && (
+                                            <div className="mt-4 space-y-4">
+                                                {sortedTechnicianWorkloads.map(
+                                                    (technician) => {
+                                                        const isSelected =
+                                                            selectedTechnician ===
+                                                            technician.technician_id;
+
+                                                        const barWidth =
+                                                            technician.open_job_count ===
+                                                                0
+                                                                ? 0
+                                                                : Math.max(
+                                                                    5,
+                                                                    (technician.open_job_count /
+                                                                        maxTechnicianWorkload) *
+                                                                    100
+                                                                );
+
+                                                        return (
+                                                            <div
+                                                                key={technician.technician_id}
+                                                                className={`rounded-lg p-2 ${isSelected
+                                                                    ? "bg-blue-50 dark:bg-blue-950/30"
+                                                                    : ""
+                                                                    }`}
+                                                            >
+                                                                <div className="mb-2 flex items-center justify-between gap-3">
+                                                                    <div className="min-w-0">
+                                                                        <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                                                                            {technician.name}
+                                                                            {isSelected && (
+                                                                                <span className="ml-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                                                                    Selected
+                                                                                </span>
+                                                                            )}
+                                                                        </p>
+
+                                                                        <p className="truncate text-xs text-slate-400 dark:text-slate-500">
+                                                                            {technician.email}
+                                                                        </p>
+                                                                    </div>
+
+                                                                    <span className="shrink-0 text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">
+                                                                        {technician.open_job_count}
+                                                                        <span className="ml-1 text-xs font-normal text-slate-500">
+                                                                            {technician.open_job_count ===
+                                                                                1
+                                                                                ? "job"
+                                                                                : "jobs"}
+                                                                        </span>
+                                                                    </span>
+                                                                </div>
+
+                                                                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                                                                    <div
+                                                                        className={`h-full rounded-full transition-all duration-500 ${isSelected
+                                                                            ? "bg-blue-600"
+                                                                            : "bg-violet-500"
+                                                                            }`}
+                                                                        style={{
+                                                                            width: `${barWidth}%`,
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                )}
+                                            </div>
+                                        )}
+
+                                        <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+                                            Includes New, Scheduled, and In Progress jobs. Completed and Cancelled jobs are excluded.
                                         </p>
-                                    )}
+                                    </div>
 
-                                    <button
-                                        type="button"
-                                        onClick={saveAssignment}
-                                        disabled={
-                                            assignmentSaving ||
-                                            !selectedTechnician ||
-                                            selectedTechnician ===
-                                                job.assigned_technician ||
-                                            activeTechnicians.length === 0
-                                        }
-                                        className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {assignmentSaving
-                                            ? "Saving..."
-                                            : job.assigned_technician
-                                                ? "Update Assignment"
+                                    <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+                                        <label
+                                            htmlFor="assigned-technician"
+                                            className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                        >
+                                            {job.assigned_technician
+                                                ? "Change Technician"
                                                 : "Assign Technician"}
-                                    </button>
+                                        </label>
+
+                                        <select
+                                            id="assigned-technician"
+                                            value={selectedTechnician}
+                                            onChange={(event) =>
+                                                setSelectedTechnician(
+                                                    event.target.value
+                                                )
+                                            }
+                                            disabled={assignmentSaving}
+                                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                                        >
+                                            <option value="">
+                                                Choose a technician
+                                            </option>
+
+                                            {technicians
+                                                .filter(
+                                                    (member) =>
+                                                        member.status === "ACTIVE" ||
+                                                        member.user.id ===
+                                                        job.assigned_technician
+                                                )
+                                                .map((member) => {
+                                                    const name =
+                                                        `${member.user.first_name} ${member.user.last_name}`.trim() ||
+                                                        member.user.email;
+
+                                                    return (
+                                                        <option
+                                                            key={member.user.id}
+                                                            value={member.user.id}
+                                                        >
+                                                            {name}
+                                                            {member.status !==
+                                                                "ACTIVE"
+                                                                ? " (Inactive)"
+                                                                : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                        </select>
+
+                                        {activeTechnicians.length === 0 && (
+                                            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                                No active technicians are available. Activate or invite a technician from Team Management.
+                                            </p>
+                                        )}
+
+                                        {assignmentError && (
+                                            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                                                {assignmentError}
+                                            </p>
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            onClick={saveAssignment}
+                                            disabled={
+                                                assignmentSaving ||
+                                                !selectedTechnician ||
+                                                selectedTechnician ===
+                                                job.assigned_technician ||
+                                                activeTechnicians.length === 0
+                                            }
+                                            className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {assignmentSaving
+                                                ? "Saving..."
+                                                : job.assigned_technician
+                                                    ? "Update Assignment"
+                                                    : "Assign Technician"}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
 

@@ -21,6 +21,7 @@ from main.jobs.views import (
     CompanyServiceJobPartListCreateView,
     CompanyServiceJobStatusView,
     CompanyServiceJobNoteListCreateView,
+    CompanyTechnicianWorkloadView,
 )
 
 
@@ -114,5 +115,10 @@ urlpatterns = [
         "companies/<uuid:company_id>/revenue/trend/",
         CompanyRevenueTrendView.as_view(),
         name="company-revenue-trend",
+    ),
+    path(
+        "companies/<uuid:company_id>/technician-workload/",
+        CompanyTechnicianWorkloadView.as_view(),
+        name="company-technician-workload",
     ),
 ]

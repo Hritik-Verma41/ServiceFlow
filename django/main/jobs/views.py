@@ -1132,3 +1132,67 @@ class CompanyServiceJobActivityListView(generics.ListAPIView):
             "created_at",
             "id",
         )
+
+class CompanyTechnicianWorkloadView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get(self, request, *args, **kwargs):
+        from django.db.models import Count, Q
+
+        company = self.get_company()
+
+        technicians = (
+            CompanyMembership.objects
+            .filter(
+                company=company,
+                role=CompanyMembership.Role.TECHNICIAN,
+                status=CompanyMembership.Status.ACTIVE,
+            )
+            .select_related("user")
+            .annotate(
+                open_job_count=Count(
+                    "user__assigned_service_jobs",
+                    filter=Q(
+                        user__assigned_service_jobs__company=company,
+                        user__assigned_service_jobs__status__in=[
+                            ServiceJob.Status.NEW,
+                            ServiceJob.Status.SCHEDULED,
+                            ServiceJob.Status.IN_PROGRESS,
+                        ],
+                    ),
+                    distinct=True,
+                )
+            )
+            .order_by(
+                "user__first_name",
+                "user__last_name",
+                "user__email",
+            )
+        )
+
+        return Response({
+            "company_id": str(company.id),
+            "results": [
+                {
+                    "technician_id": str(member.user.id),
+                    "name": (
+                        member.user.get_full_name()
+                        or member.user.email
+                    ),
+                    "email": member.user.email,
+                    "open_job_count": member.open_job_count,
+                }
+                for member in technicians
+            ],
+        })
+

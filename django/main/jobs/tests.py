@@ -3515,3 +3515,167 @@ class CompanyRevenueTrendAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+
+class CompanyTechnicianWorkloadAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Technician Workload Company",
+            phone="9000000090",
+            email="workload-company@example.com",
+        )
+
+        self.other_company = Company.objects.create(
+            name="Other Workload Company",
+            phone="9000000091",
+            email="other-workload@example.com",
+        )
+
+        self.admin = self.create_user(
+            "workload-admin@example.com",
+            self.company,
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.technician_one = self.create_user(
+            "workload-tech-one@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.technician_two = self.create_user(
+            "workload-tech-two@example.com",
+            self.company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.manager = self.create_user(
+            "workload-manager@example.com",
+            self.company,
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.other_technician = self.create_user(
+            "other-workload-tech@example.com",
+            self.other_company,
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Workload Customer",
+            email="workload-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Workload Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/technician-workload/"
+        )
+
+    def create_user(self, email, company, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def create_job(self, title, technician, job_status):
+        return ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=technician,
+            title=title,
+            status=job_status,
+        )
+
+    def test_admin_can_view_technician_workload(self):
+        self.create_job(
+            "New Job",
+            self.technician_one,
+            ServiceJob.Status.NEW,
+        )
+        self.create_job(
+            "Scheduled Job",
+            self.technician_one,
+            ServiceJob.Status.SCHEDULED,
+        )
+        self.create_job(
+            "In Progress Job",
+            self.technician_one,
+            ServiceJob.Status.IN_PROGRESS,
+        )
+        self.create_job(
+            "Completed Job",
+            self.technician_one,
+            ServiceJob.Status.COMPLETED,
+        )
+        self.create_job(
+            "Cancelled Job",
+            self.technician_one,
+            ServiceJob.Status.CANCELLED,
+        )
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+
+        results = {
+            item["technician_id"]: item
+            for item in response.data["results"]
+        }
+
+        self.assertEqual(
+            results[str(self.technician_one.id)]["open_job_count"],
+            3,
+        )
+        self.assertEqual(
+            results[str(self.technician_two.id)]["open_job_count"],
+            0,
+        )
+
+        self.assertNotIn(
+            str(self.other_technician.id),
+            results,
+        )
+
+    def test_manager_can_view_technician_workload(self):
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_technician_cannot_view_workload(self):
+        self.client.force_authenticate(user=self.technician_one)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_user_cannot_view_workload(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 401)
