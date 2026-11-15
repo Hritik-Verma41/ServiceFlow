@@ -11,6 +11,8 @@ interface TechnicianJob {
     priority: string;
     scheduled_start: string | null;
     scheduled_end: string | null;
+    completed_at?: string | null;
+    updated_at?: string | null;
 }
 
 interface TechnicianScheduleResponse {
@@ -30,6 +32,16 @@ function formatJobDate(dateValue: string): string {
         day: "numeric",
         month: "short",
         year: "numeric",
+    });
+}
+
+function formatCompletedDate(dateValue: string): string {
+    return new Date(dateValue).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
     });
 }
 
@@ -249,7 +261,13 @@ export function TechnicianSchedule() {
             setJobs((currentJobs) =>
                 currentJobs.map((currentJob) =>
                     currentJob.id === job.id
-                        ? { ...currentJob, status: targetStatus }
+                        ? {
+                            ...currentJob,
+                            status: targetStatus,
+                            ...(targetStatus === "COMPLETED"
+                                ? { completed_at: new Date().toISOString() }
+                                : {}),
+                        }
                         : currentJob
                 )
             );
@@ -268,7 +286,12 @@ export function TechnicianSchedule() {
         }
     };
 
-    const { activeJobs, todayJobs, upcomingJobs } = useMemo(() => {
+    const {
+        activeJobs,
+        todayJobs,
+        upcomingJobs,
+        completedJobs,
+    } = useMemo(() => {
         const today = getLocalDateKey(new Date());
 
         const active = jobs.filter(
@@ -276,6 +299,20 @@ export function TechnicianSchedule() {
                 job.status !== "COMPLETED" &&
                 job.status !== "CANCELLED"
         );
+
+        const completed = jobs
+            .filter((job) => job.status === "COMPLETED")
+            .sort((a, b) => {
+                const dateA = new Date(
+                    a.completed_at || a.updated_at || 0
+                ).getTime();
+
+                const dateB = new Date(
+                    b.completed_at || b.updated_at || 0
+                ).getTime();
+
+                return dateB - dateA;
+            });
 
         const todayList: TechnicianJob[] = [];
         const upcomingList: TechnicianJob[] = [];
@@ -308,6 +345,7 @@ export function TechnicianSchedule() {
             activeJobs: active,
             todayJobs: todayList,
             upcomingJobs: upcomingList,
+            completedJobs: completed,
         };
     }, [jobs]);
 
@@ -503,6 +541,53 @@ export function TechnicianSchedule() {
 
                                 <p className="mt-1 text-xs text-slate-400">
                                     New assignments will appear here.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Completed Job History */}
+                    <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h3 className="font-semibold">
+                                    Completed Job History
+                                </h3>
+                                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Your previously completed service jobs
+                                </p>
+                            </div>
+
+                            <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
+                                {completedJobs.length} completed
+                            </span>
+                        </div>
+
+                        {completedJobs.length > 0 ? (
+                            <div className="space-y-3">
+                                {completedJobs.map((job) => (
+                                    <div key={job.id} className="space-y-1">
+                                        <p className="px-1 text-xs text-slate-500 dark:text-slate-400">
+                                            Completed{" "}
+                                            {job.completed_at || job.updated_at
+                                                ? formatCompletedDate(
+                                                    job.completed_at || job.updated_at!
+                                                )
+                                                : "Date unavailable"}
+                                        </p>
+
+                                        <JobCard job={job} />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center dark:border-slate-700">
+                                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                                    No completed jobs yet
+                                </p>
+
+                                <p className="mt-1 text-xs text-slate-400">
+                                    Jobs you complete will appear here.
                                 </p>
                             </div>
                         )}
