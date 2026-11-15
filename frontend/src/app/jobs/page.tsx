@@ -42,6 +42,13 @@ interface Technician {
     email: string;
 }
 
+interface TechnicianWorkload {
+    technician_id: string;
+    name: string;
+    email: string;
+    open_job_count: number;
+}
+
 interface ServiceAddress {
     id: string;
     customer: string;
@@ -171,6 +178,10 @@ function JobsContent() {
     const [technicianId, setTechnicianId] = useState("");
     const [scheduledStart, setScheduledStart] = useState("");
     const [scheduledEnd, setScheduledEnd] = useState("");
+    const [technicianWorkloads, setTechnicianWorkloads] = useState<TechnicianWorkload[]>([]);
+    const [workloadLoading, setWorkloadLoading] = useState(false);
+    const [workloadError, setWorkloadError] = useState("");
+    const [workloadRefreshKey, setWorkloadRefreshKey] = useState(0);
 
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState("");
@@ -281,6 +292,77 @@ function JobsContent() {
         };
     }, [companyId, userLoading, canManageJobs, apiUrl]);
 
+    useEffect(() => {
+        if (!modalOpen || !canManageJobs || !companyId) {
+            return;
+        }
+
+        let active = true;
+
+        async function fetchTechnicianWorkload() {
+            setWorkloadLoading(true);
+            setWorkloadError("");
+
+            try {
+                const token = sessionStorage.getItem("accessToken");
+
+                if (!apiUrl || !token) {
+                    throw new Error("API configuration or session is missing.");
+                }
+
+                const response = await fetch(
+                    `${apiUrl}/api/companies/${companyId}/technician-workload/`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        getErrorMessage(
+                            data,
+                            "Unable to load technician workload."
+                        )
+                    );
+                }
+
+                if (active) {
+                    setTechnicianWorkloads(
+                        (data.results || []) as TechnicianWorkload[]
+                    );
+                }
+            } catch (err) {
+                if (active) {
+                    setWorkloadError(
+                        err instanceof Error
+                            ? err.message
+                            : "Unable to load technician workload."
+                    );
+                }
+            } finally {
+                if (active) {
+                    setWorkloadLoading(false);
+                }
+            }
+        }
+
+        fetchTechnicianWorkload();
+
+        return () => {
+            active = false;
+        }
+    }, [
+        modalOpen,
+        canManageJobs,
+        companyId,
+        apiUrl,
+        workloadRefreshKey,
+    ]);
+
     const customerNames = useMemo(
         () => new Map(customers.map((customer) => [customer.id, customer.name])),
         [customers]
@@ -289,6 +371,19 @@ function JobsContent() {
     const activeCustomers = useMemo(
         () => customers.filter((customer) => customer.is_active),
         [customers]
+    );
+
+    const sortedTechnicianWorkloads = useMemo(
+        () =>
+            [...technicianWorkloads].sort(
+                (a, b) => b.open_job_count - a.open_job_count
+            ),
+        [technicianWorkloads]
+    );
+
+    const maxTechnicianWorkload = Math.max(
+        1,
+        ...technicianWorkloads.map((technician) => technician.open_job_count)
     );
 
     const filteredJobs = useMemo(() => {
@@ -976,6 +1071,103 @@ function JobsContent() {
                                             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                                         />
                                     </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                                    <div className="mb-4 flex items-center justify-between gap-3">
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                Technician Workload
+                                            </h3>
+                                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                                Currently assigned open jobs per technician
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setWorkloadRefreshKey((previous) => previous + 1)
+                                            }
+                                            disabled={workloadLoading}
+                                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                        >
+                                            {workloadLoading ? "Refreshing..." : "↻ Refresh"}
+                                        </button>
+                                    </div>
+
+                                    {workloadError && (
+                                        <p className="mb-3 text-xs text-red-600 dark:text-red-400">
+                                            {workloadError}
+                                        </p>
+                                    )}
+
+                                    {workloadLoading && technicianWorkloads.length === 0 ? (
+                                        <p className="py-4 text-center text-sm text-slate-500">
+                                            Loading technician workload...
+                                        </p>
+                                    ) : sortedTechnicianWorkloads.length === 0 ? (
+                                        <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+                                            No active technicians found.
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {sortedTechnicianWorkloads.map((technician) => {
+                                                const isSelected =
+                                                    technicianId === technician.technician_id;
+
+                                                const barWidth =
+                                                    technician.open_job_count === 0
+                                                        ? 0
+                                                        : (technician.open_job_count /
+                                                            maxTechnicianWorkload) *
+                                                        100;
+
+                                                return (
+                                                    <div key={technician.technician_id}>
+                                                        <div className="mb-1.5 flex items-center justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <p
+                                                                    className={`truncate text-sm font-medium ${isSelected
+                                                                            ? "text-blue-600 dark:text-blue-400"
+                                                                            : "text-slate-700 dark:text-slate-300"
+                                                                        }`}
+                                                                >
+                                                                    {technician.name}
+                                                                    {isSelected && " (Selected)"}
+                                                                </p>
+                                                                <p className="truncate text-xs text-slate-400">
+                                                                    {technician.email}
+                                                                </p>
+                                                            </div>
+
+                                                            <span className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">
+                                                                {technician.open_job_count}{" "}
+                                                                {technician.open_job_count === 1
+                                                                    ? "job"
+                                                                    : "jobs"}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                                                            <div
+                                                                className={`h-full rounded-full transition-all duration-300 ${isSelected
+                                                                        ? "bg-blue-600"
+                                                                        : "bg-indigo-400 dark:bg-indigo-500"
+                                                                    }`}
+                                                                style={{ width: `${barWidth}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400 dark:border-slate-800">
+                                        Workload includes New, Scheduled and In Progress jobs.
+                                        Completed and Cancelled jobs are excluded.
+                                    </p>
                                 </div>
 
                                 <p className="text-xs text-slate-500 dark:text-slate-400">
