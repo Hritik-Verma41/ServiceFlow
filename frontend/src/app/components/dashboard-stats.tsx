@@ -35,12 +35,31 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
     const [inProgressJobs, setInProgressJobs] = useState<number | null>(null);
 
     const [error, setError] = useState("");
+    const [refreshKey, setRefreshKey] = useState(0);
 
     const membership = user?.memberships?.[0];
     const companyId = membership?.company_id;
     const role = membership?.role;
 
     const isTechnician = role === "TECHNICIAN";
+
+    useEffect(() => {
+        const handleJobUpdated = () => {
+            setRefreshKey((current) => current + 1);
+        };
+
+        window.addEventListener(
+            "serviceflow:technician-jobs-updated",
+            handleJobUpdated
+        );
+
+        return () => {
+            window.removeEventListener(
+                "serviceflow:technician-jobs-updated",
+                handleJobUpdated
+            );
+        };
+    }, []);
 
     useEffect(() => {
         if (profileLoading) return;
@@ -207,6 +226,7 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
         isTechnician,
         dateRange.startDate,
         dateRange.endDate,
+        refreshKey,
     ]);
 
     const stats = isTechnician

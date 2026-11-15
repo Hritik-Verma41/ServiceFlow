@@ -11,6 +11,7 @@ import { MobileNavigation } from "./components/mobile-navigation";
 import { RecentActivityFeed } from "./components/recent-activity-feed";
 import { RecentServiceJobs } from "./components/recent-service-jobs";
 import { RevenueTrendChart } from "./components/revenue-trend-chart";
+import { TechnicianSchedule } from "./components/technician-schedule";
 import { ThemeToggle } from "./components/theme-toggle";
 import {
   DateRangeSelector,
@@ -81,6 +82,8 @@ function DashboardContent() {
 
   const membership = user?.memberships?.[0];
 
+  const isTechnician = membership?.role === "TECHNICIAN";
+
   const displayRole = membership?.role
     ? membership.role
       .split("_")
@@ -129,8 +132,8 @@ function DashboardContent() {
                 key={item.label}
                 href={item.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition ${index === 0
-                    ? "bg-blue-600 font-medium text-white"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
+                  ? "bg-blue-600 font-medium text-white"
+                  : "text-slate-400 hover:bg-white/5 hover:text-white"
                   }`}
               >
                 <span className="w-5 text-center text-lg">
@@ -212,35 +215,49 @@ function DashboardContent() {
                 </h3>
 
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Here's what's happening with your operations today.
+                  {isTechnician
+                    ? "Here's your personal work schedule and assigned service jobs."
+                    : "Here's what's happening with your operations today."}
                 </p>
               </div>
 
-              <button className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
-                + Create Service Job
-              </button>
+              {!isTechnician && (
+                <button className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+                  + Create Service Job
+                </button>
+              )}
             </div>
 
-            <DateRangeSelector
-              value={dateRange}
-              onChange={setDateRange}
-            />
+            {!isTechnician && (
+              <DateRangeSelector
+                value={dateRange}
+                onChange={setDateRange}
+              />
+            )}
           </section>
 
           {/* Dashboard Statistics */}
           <DashboardStats dateRange={dateRange} />
 
-          {/* Revenue Trends & Job Status Breakdown */}
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <RevenueTrendChart dateRange={dateRange} />
-            <JobStatusBreakdown dateRange={dateRange} />
-          </div>
+          {isTechnician ? (
+            /* Technician Dashboard */
+            <TechnicianSchedule />
+          ) : (
+            /* Admin and Manager Dashboard */
+            <>
+              {/* Revenue Trends & Job Status Breakdown */}
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <RevenueTrendChart dateRange={dateRange} />
+                <JobStatusBreakdown dateRange={dateRange} />
+              </div>
 
-          {/* Recent Activity Feed */}
-          <RecentActivityFeed dateRange={dateRange} />
+              {/* Recent Activity Feed */}
+              <RecentActivityFeed dateRange={dateRange} />
 
-          {/* Recent Service Jobs */}
-          <RecentServiceJobs dateRange={dateRange} />
+              {/* Recent Service Jobs */}
+              <RecentServiceJobs dateRange={dateRange} />
+            </>
+          )}
         </div>
       </main>
     </div>
