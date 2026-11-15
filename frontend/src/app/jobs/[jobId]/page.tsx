@@ -72,6 +72,15 @@ interface JobActivity {
     metadata: Record<string, unknown>;
 }
 
+interface JobNote {
+    id: string;
+    job: string;
+    created_by: string;
+    note: string;
+    created_at: string;
+    updated_at: string;
+}
+
 function formatLabel(value: string) {
     return value
         .replaceAll("_", " ")
@@ -251,6 +260,13 @@ function JobDetailsContent() {
     const [activityLoading, setActivityLoading] = useState(true);
     const [activityError, setActivityError] = useState("");
 
+    const [notes, setNotes] = useState<JobNote[]>([]);
+    const [notesLoading, setNotesLoading] = useState(true);
+    const [notesError, setNotesError] = useState("");
+    const [newNote, setNewNote] = useState("");
+    const [noteSaving, setNoteSaving] = useState(false);
+    const [teamMembers, setTeamMembers] = useState<CompanyMember[]>([]);
+
     const fetchActivities = useCallback(async () => {
         if (!companyId || !apiUrl || !jobId) return;
 
@@ -300,6 +316,112 @@ function JobDetailsContent() {
             setActivityLoading(false);
         }
     }, [companyId, apiUrl, jobId]);
+
+    const fetchNotes = useCallback(async () => {
+        if (!companyId || !apiUrl || !jobId) return;
+
+        setNotesLoading(true);
+        setNotesError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/jobs/${jobId}/notes/`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(data, "Unable to load job notes.")
+                );
+            }
+
+            setNotes(
+                Array.isArray(data)
+                    ? data
+                    : Array.isArray(data.results)
+                        ? data.results
+                        : []
+            );
+        } catch (err) {
+            setNotesError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to load job notes."
+            );
+        } finally {
+            setNotesLoading(false);
+        }
+    }, [companyId, apiUrl, jobId]);
+
+    async function addJobNote() {
+        if (!companyId || !apiUrl || !jobId || !newNote.trim()) {
+            return;
+        }
+
+        setNoteSaving(true);
+        setNotesError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/jobs/${jobId}/notes/`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        note: newNote.trim(),
+                    }),
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(data, "Unable to add job note.")
+                );
+            }
+
+            setNewNote("");
+
+            await Promise.all([
+                fetchNotes(),
+                fetchActivities(),
+            ]);
+        } catch (err) {
+            setNotesError(
+                err instanceof Error
+                    ? err.message
+                    : "Something went wrong while adding the note."
+            );
+        } finally {
+            setNoteSaving(false);
+        }
+    }
 
     const fetchTechnicianWorkload = useCallback(async () => {
         if (!companyId || !apiUrl) return;
@@ -481,6 +603,8 @@ function JobDetailsContent() {
                             (member) => member.role === "TECHNICIAN"
                         )
                     );
+
+                    setTeamMembers(members);
                 }
             } catch (err) {
                 if (active) {
@@ -507,6 +631,12 @@ function JobDetailsContent() {
 
         fetchActivities();
     }, [userLoading, companyId, apiUrl, jobId, fetchActivities]);
+
+    useEffect(() => {
+        if (userLoading || !companyId || !apiUrl || !jobId) return;
+
+        fetchNotes();
+    }, [userLoading, companyId, apiUrl, jobId, fetchNotes]);
 
     useEffect(() => {
         if (
@@ -1218,6 +1348,132 @@ function JobDetailsContent() {
                                 </p>
                             )}
                         </div>
+
+                        <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                                        Job Notes
+                                    </h2>
+
+                                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                        Work updates, observations and notes from the team.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={fetchNotes}
+                                    disabled={notesLoading}
+                                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                >
+                                    {notesLoading ? "Refreshing..." : "Refresh"}
+                                </button>
+                            </div>
+
+                            <div className="mt-5">
+                                <textarea
+                                    value={newNote}
+                                    onChange={(event) => setNewNote(event.target.value)}
+                                    placeholder="Write a work update, observation or note..."
+                                    rows={3}
+                                    maxLength={2000}
+                                    className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:ring-blue-950"
+                                />
+
+                                <div className="mt-2 flex items-center justify-between gap-3">
+                                    <p className="text-xs text-slate-400">
+                                        {newNote.length}/2000 characters
+                                    </p>
+
+                                    <button
+                                        type="button"
+                                        onClick={addJobNote}
+                                        disabled={noteSaving || !newNote.trim()}
+                                        className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {noteSaving ? "Adding..." : "Add Note"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {notesError && (
+                                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
+                                    {notesError}
+
+                                    <button
+                                        type="button"
+                                        onClick={fetchNotes}
+                                        className="ml-2 font-semibold underline"
+                                    >
+                                        Try again
+                                    </button>
+                                </div>
+                            )}
+
+                            {notesLoading && notes.length === 0 && (
+                                <div className="mt-6 flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600 dark:border-slate-700 dark:border-t-blue-400" />
+                                    Loading notes...
+                                </div>
+                            )}
+
+                            {!notesLoading && !notesError && notes.length === 0 && (
+                                <div className="mt-6 rounded-xl bg-slate-50 px-4 py-8 text-center dark:bg-slate-950">
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                        No notes yet
+                                    </p>
+
+                                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                        Add the first update for this service job.
+                                    </p>
+                                </div>
+                            )}
+
+                            {notes.length > 0 && (
+                                <div className="mt-6 space-y-4">
+                                    {notes.map((note) => {
+                                        const author = teamMembers.find(
+                                            (member) => member.user.id === note.created_by
+                                        );
+
+                                        const authorName = author
+                                            ? `${author.user.first_name} ${author.user.last_name}`.trim() ||
+                                            author.user.email
+                                            : note.created_by === user?.id
+                                                ? "You"
+                                                : "Team member";
+
+                                        return (
+                                            <div
+                                                key={note.id}
+                                                className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950"
+                                            >
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-400">
+                                                            {authorName.charAt(0).toUpperCase()}
+                                                        </div>
+
+                                                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                                            {authorName}
+                                                        </p>
+                                                    </div>
+
+                                                    <time className="text-xs text-slate-400 dark:text-slate-500">
+                                                        {formatDate(note.created_at)}
+                                                    </time>
+                                                </div>
+
+                                                <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700 dark:text-slate-300">
+                                                    {note.note}
+                                                </p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
 
                         <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
                             <div className="flex flex-wrap items-center justify-between gap-3">
