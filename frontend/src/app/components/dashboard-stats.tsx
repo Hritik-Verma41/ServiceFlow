@@ -2,14 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DashboardDateRange } from "./date-range-selector";
-
-interface DashboardStatsProps {
-    dateRange: DashboardDateRange;
-}
-
-interface Company {
-    id: string;
-}
+import { useCurrentUser } from "./current-user-provider";
 
 interface ServiceJob {
     status: string;
@@ -25,24 +18,51 @@ interface RevenueResponse {
     currency: string;
 }
 
+interface DashboardStatsProps {
+    dateRange: DashboardDateRange;
+}
+
 export function DashboardStats({ dateRange }: DashboardStatsProps) {
+    const { user, loading: profileLoading } = useCurrentUser();
+
     const [totalJobs, setTotalJobs] = useState<number | null>(null);
     const [activeJobs, setActiveJobs] = useState<number | null>(null);
-    const [error, setError] = useState("");
     const [technicians, setTechnicians] = useState<number | null>(null);
     const [revenue, setRevenue] = useState<string | null>(null);
 
+    const [newJobs, setNewJobs] = useState<number | null>(null);
+    const [scheduledJobs, setScheduledJobs] = useState<number | null>(null);
+    const [inProgressJobs, setInProgressJobs] = useState<number | null>(null);
+
+    const [error, setError] = useState("");
+
+    const membership = user?.memberships?.[0];
+    const companyId = membership?.company_id;
+    const role = membership?.role;
+
+    const isTechnician = role === "TECHNICIAN";
+
     useEffect(() => {
+        if (profileLoading) return;
+
         const controller = new AbortController();
 
         async function fetchStats() {
             try {
                 setError("");
 
+                if (!companyId) {
+                    throw new Error("No active company membership found.");
+                }
+
                 if (!dateRange.startDate || !dateRange.endDate) {
                     setTotalJobs(null);
                     setActiveJobs(null);
+                    setTechnicians(null);
                     setRevenue(null);
+                    setNewJobs(null);
+                    setScheduledJobs(null);
+                    setInProgressJobs(null);
                     return;
                 }
 
@@ -57,32 +77,42 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
                     Authorization: `Bearer ${token}`,
                 };
 
-                const companyResponse = await fetch(
-                    `${apiUrl}/api/companies/`,
-                    {
-                        headers,
-                        signal: controller.signal,
-                    }
-                );
-
-                if (!companyResponse.ok) {
-                    throw new Error("Unable to load company information.");
-                }
-
-                const companies: Company[] = await companyResponse.json();
-
-                if (companies.length === 0) {
-                    throw new Error("No active company found.");
-                }
-
-                const companyId = companies[0].id;
-
                 const queryParams = new URLSearchParams({
                     start_date: dateRange.startDate,
                     end_date: dateRange.endDate,
                 });
 
-                // Fetch current technician count.
+                // Technician dashboard: only fetch jobs assigned to the logged-in technician.
+                if (isTechnician) {
+                    const jobsResponse = await fetch(
+                        `${apiUrl}/api/companies/${companyId}/jobs/?${queryParams}`,
+                        {
+                            headers,
+                            signal: controller.signal,
+                        }
+                    );
+
+                    if (!jobsResponse.ok) {
+                        throw new Error("Unable to load your assigned jobs.");
+                    }
+
+                    const jobs: ServiceJob[] = await jobsResponse.json();
+
+                    setTotalJobs(jobs.length);
+                    setNewJobs(
+                        jobs.filter((job) => job.status === "NEW").length
+                    );
+                    setScheduledJobs(
+                        jobs.filter((job) => job.status === "SCHEDULED").length
+                    );
+                    setInProgressJobs(
+                        jobs.filter((job) => job.status === "IN_PROGRESS").length
+                    );
+
+                    return;
+                }
+
+                // Admin and Manager dashboard.
                 const membersResponse = await fetch(
                     `${apiUrl}/api/companies/${companyId}/members/`,
                     {
@@ -95,8 +125,7 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
                     throw new Error("Unable to load technician information.");
                 }
 
-                const members: CompanyMember[] =
-                    await membersResponse.json();
+                const members: CompanyMember[] = await membersResponse.json();
 
                 setTechnicians(
                     members.filter(
@@ -106,7 +135,6 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
                     ).length
                 );
 
-                // Fetch jobs created during the selected period.
                 const jobsResponse = await fetch(
                     `${apiUrl}/api/companies/${companyId}/jobs/?${queryParams}`,
                     {
@@ -131,7 +159,6 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
                     ).length
                 );
 
-                // Fetch collected revenue during the selected period.
                 const revenueResponse = await fetch(
                     `${apiUrl}/api/companies/${companyId}/revenue/?${queryParams}`,
                     {
@@ -174,14 +201,67 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
         fetchStats();
 
         return () => controller.abort();
-    }, [dateRange.startDate, dateRange.endDate]);
+    }, [
+        profileLoading,
+        companyId,
+        isTechnician,
+        dateRange.startDate,
+        dateRange.endDate,
+    ]);
 
-    const stats = [
-        { label: "Total Jobs", value: totalJobs, icon: "▤" },
-        { label: "Active Jobs", value: activeJobs, icon: "◷" },
-        { label: "Technicians", value: technicians, icon: "♙" },
-        { label: "Revenue", value: revenue, icon: "₹" },
-    ];
+    const stats = isTechnician
+        ? [
+            {
+                label: "My Assigned Jobs",
+                value: totalJobs,
+                icon: "▤",
+                description: "Jobs assigned to you",
+            },
+            {
+                label: "New Jobs",
+                value: newJobs,
+                icon: "✦",
+                description: "Awaiting scheduling",
+            },
+            {
+                label: "Scheduled Jobs",
+                value: scheduledJobs,
+                icon: "◷",
+                description: "Ready for work",
+            },
+            {
+                label: "In Progress",
+                value: inProgressJobs,
+                icon: "⚙",
+                description: "Currently being worked on",
+            },
+        ]
+        : [
+            {
+                label: "Total Jobs",
+                value: totalJobs,
+                icon: "▤",
+                description: "Selected date range",
+            },
+            {
+                label: "Active Jobs",
+                value: activeJobs,
+                icon: "◷",
+                description: "Selected date range",
+            },
+            {
+                label: "Technicians",
+                value: technicians,
+                icon: "♙",
+                description: "Current active team",
+            },
+            {
+                label: "Revenue",
+                value: revenue,
+                icon: "₹",
+                description: "Selected date range",
+            },
+        ];
 
     return (
         <section className="space-y-3">
@@ -212,9 +292,7 @@ export function DashboardStats({ dateRange }: DashboardStatsProps) {
                         </p>
 
                         <p className="mt-2 text-xs text-slate-400">
-                            {stat.label === "Technicians"
-                                ? "Current active team"
-                                : "Selected date range"}
+                            {stat.description}
                         </p>
                     </div>
                 ))}

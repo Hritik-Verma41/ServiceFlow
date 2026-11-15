@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useCurrentUser } from "./current-user-provider";
 import type { DashboardDateRange } from "./date-range-selector";
 
 interface RevenueTrendChartProps {
     dateRange: DashboardDateRange;
-}
-
-interface Company {
-    id: string;
 }
 
 interface RevenueTrendItem {
@@ -73,12 +70,27 @@ function formatDateLabel(date: string): string {
 export function RevenueTrendChart({
     dateRange,
 }: RevenueTrendChartProps) {
+    const { user, loading: profileLoading } = useCurrentUser();
+
+    const membership = user?.memberships?.[0];
+    const companyId = membership?.company_id;
+    const isTechnician = membership?.role === "TECHNICIAN";
+
     const [points, setPoints] = useState<ChartPoint[]>([]);
     const [currency, setCurrency] = useState("INR");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
     useEffect(() => {
+        if (profileLoading) return;
+
+        if (isTechnician) {
+            setPoints([]);
+            setError("");
+            setLoading(false);
+            return;
+        }
+
         const controller = new AbortController();
 
         async function fetchRevenueTrend() {
@@ -90,6 +102,10 @@ export function RevenueTrendChart({
                     setPoints([]);
                     setLoading(false);
                     return;
+                }
+
+                if (!companyId) {
+                    throw new Error("No active company membership found.");
                 }
 
                 const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -104,27 +120,6 @@ export function RevenueTrendChart({
                 const headers = {
                     Authorization: `Bearer ${token}`,
                 };
-
-                const companyResponse = await fetch(
-                    `${apiUrl}/api/companies/`,
-                    {
-                        headers,
-                        signal: controller.signal,
-                    }
-                );
-
-                if (!companyResponse.ok) {
-                    throw new Error("Unable to load company information.");
-                }
-
-                const companies: Company[] =
-                    await companyResponse.json();
-
-                if (companies.length === 0) {
-                    throw new Error("No active company found.");
-                }
-
-                const companyId = companies[0].id;
 
                 const queryParams = new URLSearchParams({
                     start_date: dateRange.startDate,
@@ -148,7 +143,7 @@ export function RevenueTrendChart({
 
                 setCurrency(data.currency);
 
-                const revenueByDate = new Map(
+                const revenueByDate = new Map<string, number>(
                     data.results.map((item) => [
                         item.date,
                         Number(item.revenue),
@@ -189,7 +184,18 @@ export function RevenueTrendChart({
         fetchRevenueTrend();
 
         return () => controller.abort();
-    }, [dateRange.startDate, dateRange.endDate]);
+    }, [
+        profileLoading,
+        isTechnician,
+        companyId,
+        dateRange.startDate,
+        dateRange.endDate,
+    ]);
+
+    // Revenue information is not displayed to technicians.
+    if (profileLoading || isTechnician) {
+        return null;
+    }
 
     const maxRevenue = Math.max(
         ...points.map((point) => point.revenue),
@@ -210,7 +216,7 @@ export function RevenueTrendChart({
         points.length <= 1
             ? chartWidth / 2
             : leftPadding +
-              (index / (points.length - 1)) * plotWidth;
+            (index / (points.length - 1)) * plotWidth;
 
     const getY = (revenue: number) =>
         topPadding +
@@ -228,9 +234,8 @@ export function RevenueTrendChart({
 
     const areaPath =
         points.length > 0
-            ? `${linePath} L ${getX(points.length - 1)} ${
-                  topPadding + plotHeight
-              } L ${getX(0)} ${topPadding + plotHeight} Z`
+            ? `${linePath} L ${getX(points.length - 1)} ${topPadding + plotHeight
+            } L ${getX(0)} ${topPadding + plotHeight} Z`
             : "";
 
     const labelStep = Math.max(
@@ -290,9 +295,11 @@ export function RevenueTrendChart({
             {!loading && !error && points.length > 0 && maxRevenue === 0 && (
                 <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
                     <span className="text-3xl text-slate-300">₹</span>
+
                     <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
                         No collected revenue during this period
                     </p>
+
                     <p className="text-xs text-slate-400">
                         Revenue will appear here when payments are received.
                     </p>
@@ -309,8 +316,7 @@ export function RevenueTrendChart({
                     >
                         {[0, 1, 2, 3].map((step) => {
                             const y =
-                                topPadding +
-                                (plotHeight / 3) * step;
+                                topPadding + (plotHeight / 3) * step;
 
                             return (
                                 <line
