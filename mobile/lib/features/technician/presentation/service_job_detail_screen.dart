@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:serviceflow/features/technician/data/service_job_repository.dart';
 import 'package:serviceflow/features/technician/domain/service_job.dart';
 
-class ServiceJobDetailScreen extends ConsumerWidget {
+class ServiceJobDetailScreen extends ConsumerStatefulWidget {
   final String companyId;
   final String jobId;
 
@@ -14,9 +14,71 @@ class ServiceJobDetailScreen extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ServiceJobDetailScreen> createState() =>
+      _ServiceJobDetailScreenState();
+}
+
+class _ServiceJobDetailScreenState
+    extends ConsumerState<ServiceJobDetailScreen> {
+  bool _isUpdating = false;
+
+  Future<void> _updateStatus(String status) async {
+    if (_isUpdating) return;
+
+    setState(() => _isUpdating = true);
+
+    try {
+      await ref
+          .read(serviceJobRepositoryProvider)
+          .updateJobStatus(
+            companyId: widget.companyId,
+            jobId: widget.jobId,
+            status: status,
+          );
+
+      final detailProvider = serviceJobDetailProvider((
+        companyId: widget.companyId,
+        jobId: widget.jobId,
+      ));
+
+      ref.invalidate(detailProvider);
+      ref.invalidate(technicianJobsProvider(widget.companyId));
+
+      await ref.read(detailProvider.future);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'IN_PROGRESS'
+                ? 'Work started successfully.'
+                : 'Job completed successfully.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to update job status. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdating = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final jobAsync = ref.watch(
-      serviceJobDetailProvider((companyId: companyId, jobId: jobId)),
+      serviceJobDetailProvider((
+        companyId: widget.companyId,
+        jobId: widget.jobId,
+      )),
     );
 
     return Scaffold(
@@ -26,16 +88,23 @@ class ServiceJobDetailScreen extends ConsumerWidget {
         error: (error, stackTrace) => _ErrorView(
           onRetry: () {
             ref.invalidate(
-              serviceJobDetailProvider((companyId: companyId, jobId: jobId)),
+              serviceJobDetailProvider((
+                companyId: widget.companyId,
+                jobId: widget.jobId,
+              )),
             );
           },
         ),
         data: (job) => _JobDetails(
           job: job,
+          isUpdating: _isUpdating,
+          onStatusUpdate: _updateStatus,
           onRefresh: () async {
             final _ = await ref.refresh(
-              serviceJobDetailProvider((companyId: companyId, jobId: jobId))
-                  .future,
+              serviceJobDetailProvider((
+                companyId: widget.companyId,
+                jobId: widget.jobId,
+              )).future,
             );
           },
         ),
@@ -46,9 +115,16 @@ class ServiceJobDetailScreen extends ConsumerWidget {
 
 class _JobDetails extends StatelessWidget {
   final ServiceJob job;
+  final bool isUpdating;
+  final Future<void> Function(String status) onStatusUpdate;
   final Future<void> Function() onRefresh;
 
-  const _JobDetails({required this.job, required this.onRefresh});
+  const _JobDetails({
+    required this.job,
+    required this.isUpdating,
+    required this.onStatusUpdate,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +143,6 @@ class _JobDetails extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -82,9 +157,7 @@ class _JobDetails extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 24),
-
           _SectionCard(
             title: 'Job Description',
             icon: Icons.description_outlined,
@@ -95,9 +168,7 @@ class _JobDetails extends StatelessWidget {
               style: theme.textTheme.bodyMedium,
             ),
           ),
-
           const SizedBox(height: 16),
-
           _SectionCard(
             title: 'Customer & Service Address',
             icon: Icons.location_on_outlined,
@@ -115,9 +186,7 @@ class _JobDetails extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-
           _SectionCard(
             title: 'Schedule',
             icon: Icons.calendar_month_outlined,
@@ -135,9 +204,7 @@ class _JobDetails extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-
           _SectionCard(
             title: 'Job Timeline',
             icon: Icons.timeline_outlined,
@@ -156,6 +223,50 @@ class _JobDetails extends StatelessWidget {
             ),
           ),
 
+          // Technician job actions
+          if (job.status == 'SCHEDULED' || job.status == 'IN_PROGRESS') ...[
+            const SizedBox(height: 20),
+            _SectionCard(
+              title: 'Job Actions',
+              icon: Icons.engineering_outlined,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (job.status == 'SCHEDULED')
+                    FilledButton.icon(
+                      onPressed: isUpdating
+                          ? null
+                          : () => onStatusUpdate('IN_PROGRESS'),
+                      icon: isUpdating
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.play_arrow),
+                      label: const Text('Start Work'),
+                    ),
+                  if (job.status == 'IN_PROGRESS')
+                    FilledButton.icon(
+                      onPressed: isUpdating
+                          ? null
+                          : () => onStatusUpdate('COMPLETED'),
+                      icon: isUpdating
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check_circle_outline),
+                      label: const Text('Complete Job'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
         ],
       ),

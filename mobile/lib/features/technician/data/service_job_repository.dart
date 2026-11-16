@@ -58,4 +58,15 @@ class ServiceJobRepository {
 
     return ServiceJob.fromJson(response.data as Map<String, dynamic>);
   }
+
+  Future<void> updateJobStatus({
+    required String companyId,
+    required String jobId,
+    required String status,
+  }) async {
+    await ApiClient.dio.post(
+      '/api/companies/$companyId/jobs/$jobId/status/',
+      data: {'status': status},
+    );
+  }
 }
