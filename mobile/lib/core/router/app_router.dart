@@ -6,6 +6,7 @@ import 'package:serviceflow/features/auth/presentation/auth_controller.dart';
 import 'package:serviceflow/features/auth/presentation/login_screen.dart';
 import 'package:serviceflow/features/customer/customer_home_screen.dart';
 import 'package:serviceflow/features/technician/presentation/service_job_detail_screen.dart';
+import 'package:serviceflow/features/technician/presentation/technician_activity_screen.dart';
 import 'package:serviceflow/features/technician/presentation/technician_home_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -57,6 +58,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return ServiceJobDetailScreen(
             companyId: state.pathParameters['companyId']!,
             jobId: state.pathParameters['jobId']!,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/activity/:companyId',
+        builder: (context, state) {
+          return TechnicianActivityScreen(
+            companyId: state.pathParameters['companyId']!,
           );
         },
       ),

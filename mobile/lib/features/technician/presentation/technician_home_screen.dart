@@ -32,7 +32,17 @@ class TechnicianHomeScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Assigned Jobs'),
-        actions: const [ThemeModeSelector(), SizedBox(width: 8)],
+        actions: [
+          IconButton(
+            tooltip: 'Activity History',
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              context.push('/activity/${membership.companyId}');
+            },
+          ),
+          const ThemeModeSelector(),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
