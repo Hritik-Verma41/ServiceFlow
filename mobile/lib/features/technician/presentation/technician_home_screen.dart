@@ -34,6 +34,13 @@ class TechnicianHomeScreen extends ConsumerWidget {
         title: const Text('My Assigned Jobs'),
         actions: [
           IconButton(
+            tooltip: 'Completed Jobs',
+            icon: const Icon(Icons.task_alt_outlined),
+            onPressed: () {
+              context.push('/completed-jobs/${membership.companyId}');
+            },
+          ),
+          IconButton(
             tooltip: 'Activity History',
             icon: const Icon(Icons.history),
             onPressed: () {
