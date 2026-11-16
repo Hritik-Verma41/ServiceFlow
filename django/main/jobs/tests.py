@@ -26,6 +26,7 @@ from main.jobs.models import (
     ActivityLog,
     Invoice,
     InvoiceItem,
+    JobCompletionReport,
     JobNote,
     JobPart,
     Part,
@@ -3679,3 +3680,237 @@ class CompanyTechnicianWorkloadAPITests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 401)
+
+class JobCompletionReportAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.company = Company.objects.create(
+            name="Completion Report Test Company",
+            phone="9000000100",
+            email="completion-report-company@example.com",
+        )
+
+        self.customer = Customer.objects.create(
+            company=self.company,
+            name="Completion Report Customer",
+            email="completion-customer@example.com",
+        )
+
+        self.address = CustomerAddress.objects.create(
+            customer=self.customer,
+            label="Primary",
+            address_line_1="123 Report Street",
+            city="Pune",
+            state="Maharashtra",
+            postal_code="411001",
+            country="India",
+        )
+
+        self.admin = self.create_user(
+            "report-admin@example.com",
+            CompanyMembership.Role.COMPANY_ADMIN,
+        )
+
+        self.manager = self.create_user(
+            "report-manager@example.com",
+            CompanyMembership.Role.MANAGER,
+        )
+
+        self.technician = self.create_user(
+            "report-technician@example.com",
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.other_technician = self.create_user(
+            "report-other-technician@example.com",
+            CompanyMembership.Role.TECHNICIAN,
+        )
+
+        self.job = ServiceJob.objects.create(
+            company=self.company,
+            customer=self.customer,
+            service_address=self.address,
+            assigned_technician=self.technician,
+            title="AC Repair",
+            status=ServiceJob.Status.IN_PROGRESS,
+        )
+
+        self.url = (
+            f"/api/companies/{self.company.id}/"
+            f"jobs/{self.job.id}/completion-report/"
+        )
+
+        self.report_payload = {
+            "work_performed": "Repaired the AC compressor.",
+            "issues_found": "Compressor was overheating.",
+            "parts_used": "One replacement capacitor.",
+            "parts_required": "None.",
+            "recommendations": "Schedule routine maintenance.",
+            "additional_notes": "System tested successfully.",
+        }
+
+    def create_user(self, email, role):
+        user = User.objects.create_user(
+            email=email,
+            password="TestPassword-123!",
+            role=role,
+            company=self.company,
+        )
+
+        CompanyMembership.objects.create(
+            user=user,
+            company=self.company,
+            role=role,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        return user
+
+    def test_assigned_technician_can_submit_completion_report(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            self.report_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data["work_performed"],
+            self.report_payload["work_performed"],
+        )
+        self.assertEqual(
+            str(response.data["submitted_by"]),
+            str(self.technician.id),
+        )
+
+        self.assertTrue(
+            JobCompletionReport.objects.filter(
+                job=self.job,
+                submitted_by=self.technician,
+            ).exists()
+        )
+
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                job=self.job,
+                event_type=(
+                    ActivityLog.EventType.COMPLETION_REPORT_SUBMITTED
+                ),
+            ).exists()
+        )
+
+    def test_admin_can_view_completion_report(self):
+        report = JobCompletionReport.objects.create(
+            job=self.job,
+            submitted_by=self.technician,
+            work_performed="Compressor repaired.",
+        )
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(report.id))
+
+    def test_manager_can_view_completion_report(self):
+        JobCompletionReport.objects.create(
+            job=self.job,
+            submitted_by=self.technician,
+            work_performed="Compressor repaired.",
+        )
+
+        self.client.force_authenticate(user=self.manager)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["work_performed"],
+            "Compressor repaired.",
+        )
+
+    def test_assigned_technician_can_view_empty_report(self):
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data)
+
+    def test_unassigned_technician_cannot_access_completion_report(self):
+        self.client.force_authenticate(user=self.other_technician)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_cannot_submit_completion_report(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.url,
+            self.report_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(
+            JobCompletionReport.objects.filter(job=self.job).exists()
+        )
+
+    def test_technician_cannot_submit_report_before_job_is_in_progress(self):
+        self.job.status = ServiceJob.Status.SCHEDULED
+        self.job.save(update_fields=["status"])
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            self.report_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            JobCompletionReport.objects.filter(job=self.job).exists()
+        )
+
+    def test_duplicate_completion_report_is_rejected(self):
+        JobCompletionReport.objects.create(
+            job=self.job,
+            submitted_by=self.technician,
+            work_performed="Already completed.",
+        )
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            self.url,
+            self.report_payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_empty_work_performed_is_rejected(self):
+        self.client.force_authenticate(user=self.technician)
+
+        payload = {
+            **self.report_payload,
+            "work_performed": "   ",
+        }
+
+        response = self.client.post(
+            self.url,
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            JobCompletionReport.objects.filter(job=self.job).exists()
+        )

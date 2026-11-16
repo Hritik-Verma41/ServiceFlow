@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -23,6 +24,7 @@ from .models import (
     ActivityLog,
     Invoice,
     InvoiceItem,
+    JobCompletionReport,
     JobNote,
     JobPart,
     Part,
@@ -35,6 +37,7 @@ from .serializers import (
     InvoiceCreateSerializer,
     InvoiceSerializer,
     InvoiceUpdateSerializer,
+    JobCompletionReportSerializer,
     JobNoteSerializer,
     JobPartSerializer,
     PartSerializer,
@@ -469,6 +472,113 @@ class CompanyServiceJobNoteListCreateView(generics.ListCreateAPIView):
             metadata={
                 "note_id": str(note.id),
             },
+        )
+
+class CompanyServiceJobCompletionReportView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+        IsActiveCompanyMember,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def get_job(self, company):
+        job = get_object_or_404(
+            ServiceJob,
+            id=self.kwargs["job_id"],
+            company=company,
+        )
+
+        membership = get_object_or_404(
+            CompanyMembership,
+            company=company,
+            user=self.request.user,
+            status=CompanyMembership.Status.ACTIVE,
+        )
+
+        if (
+            membership.role == CompanyMembership.Role.TECHNICIAN
+            and job.assigned_technician_id != self.request.user.id
+        ):
+            raise PermissionDenied(
+                "You can only access reports for the jobs assigned to you."
+            )
+
+        return job, membership
+
+    def get(self, request, company_id, job_id):
+        company = self.get_company()
+        job, membership = self.get_job(company)
+
+        report = JobCompletionReport.objects.filter(
+            job=job
+        ).select_related("submitted_by").first()
+
+        if not report:
+            return Response(None, status=status.HTTP_200_OK)
+
+        serializer = JobCompletionReportSerializer(report)
+        return Response(serializer.data)
+
+    def post(self, request, company_id, job_id):
+        company = self.get_company()
+        job, membership = self.get_job(company)
+
+        if membership.role != CompanyMembership.Role.TECHNICIAN:
+            raise PermissionDenied(
+                "Only the assigned technician can submit a completion report."
+            )
+
+        if job.status != ServiceJob.Status.IN_PROGRESS:
+            return Response(
+                {
+                    "detail": (
+                        "A completion report can only be submitted "
+                        "while the jon is in progress."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if JobCompletionReport.objects.filter(job=job).exists():
+            return Response(
+                {
+                    "detail": "A completion report already exists for this job."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = JobCompletionReportSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        report = serializer.save(
+            job=job,
+            submitted_by=request.user,
+        )
+
+        ActivityLog.objects.create(
+            company=company,
+            job=job,
+            actor=request.user,
+            event_type=ActivityLog.EventType.COMPLETION_REPORT_SUBMITTED,
+            description=(
+                f"Completion report submitted for {job.title}"
+            ),
+            metadata={
+                "report_id": str(report.id),
+            },
+        )
+
+        return Response(
+            JobCompletionReportSerializer(report).data,
+            status=status.HTTP_201_CREATED,
         )
 
 class CompanyPartListCreateView(generics.ListCreateAPIView):

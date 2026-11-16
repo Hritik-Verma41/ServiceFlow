@@ -10,6 +10,7 @@ from .models import (
     ActivityLog,
     Invoice,
     InvoiceItem,
+    JobCompletionReport,
     JobNote,
     JobPart,
     Part,
@@ -143,6 +144,47 @@ class JobNoteSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+class JobCompletionReportSerializer(serializers.ModelSerializer):
+    submitted_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JobCompletionReport
+        fields = [
+            "id",
+            "job",
+            "submitted_by",
+            "submitted_by_name",
+            "work_performed",
+            "issues_found",
+            "parts_used",
+            "parts_required",
+            "recommendations",
+            "additional_notes",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "job",
+            "submitted_by",
+            "submitted_by_name",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_submitted_by_name(self, obj):
+        return (
+            obj.submitted_by.get_full_name()
+            or obj.submitted_by.email
+        )
+
+    def validate_work_performed(self, value):
+        if not value.strip():
+            raise serializers.ValidationError(
+                "Please describe the work performed."
+            )
+        return value.strip()
 
 class PartSerializer(serializers.ModelSerializer):
     class Meta:

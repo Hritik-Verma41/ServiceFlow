@@ -145,6 +145,57 @@ class JobNote(models.Model):
     def __str__(self):
         return f"Note for {self.job.title}"
 
+class JobCompletionReport(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    job = models.OneToOneField(
+        ServiceJob,
+        on_delete=models.CASCADE,
+        related_name="completion_report",
+    )
+
+    submitted_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="job_completion_reports",
+    )
+
+    work_performed = models.TextField()
+
+    issues_found = models.TextField(
+        blank=True,
+    )
+
+    parts_used = models.TextField(
+        blank=True,
+    )
+
+    parts_required = models.TextField(
+        blank=True,
+    )
+
+    recommendations = models.TextField(
+        blank=True,
+    )
+
+    additional_notes = models.TextField(
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    def __str__(self):
+        return f"Completion Report - {self.job.title}"
 
 class Part(models.Model):
     id = models.UUIDField(
@@ -674,6 +725,7 @@ class ActivityLog(models.Model):
         JOB_CREATED = "JOB_CREATED", "Job Created"
         JOB_STATUS_CHANGED = "JOB_STATUS_CHANGED", "Job Status Changed"
         TECHNICIAN_ASSIGNED = "TECHNICIAN_ASSIGNED", "Technician Assigned"
+        COMPLETION_REPORT_SUBMITTED = "COMPLETION_REPORT_SUBMITTED", "Completion Report Submitted"
         NOTE_ADDED = "NOTE_ADDED", "Job Note Added"
         INVOICE_CREATED = "INVOICE_CREATED", "Invoice Created"
         PAYMENT_RECEIVED = "PAYMENT_RECEIVED", "Payment Received"

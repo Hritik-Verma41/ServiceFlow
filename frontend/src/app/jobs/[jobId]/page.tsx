@@ -81,6 +81,21 @@ interface JobNote {
     updated_at: string;
 }
 
+interface JobCompletionReport {
+    id: string;
+    job: string;
+    submitted_by: string;
+    submitted_by_name: string;
+    work_performed: string;
+    issues_found: string;
+    parts_used: string;
+    parts_required: string;
+    recommendations: string;
+    additional_notes: string;
+    created_at: string;
+    updated_at: string;
+}
+
 function formatLabel(value: string) {
     return value
         .replaceAll("_", " ")
@@ -267,6 +282,22 @@ function JobDetailsContent() {
     const [noteSaving, setNoteSaving] = useState(false);
     const [teamMembers, setTeamMembers] = useState<CompanyMember[]>([]);
 
+    const [completionReport, setCompletionReport] =
+        useState<JobCompletionReport | null>(null);
+
+    const [reportLoading, setReportLoading] = useState(true);
+    const [reportError, setReportError] = useState("");
+    const [reportSaving, setReportSaving] = useState(false);
+
+    const [reportForm, setReportForm] = useState({
+        work_performed: "",
+        issues_found: "",
+        parts_used: "",
+        parts_required: "",
+        recommendations: "",
+        additional_notes: "",
+    });
+
     const fetchActivities = useCallback(async () => {
         if (!companyId || !apiUrl || !jobId) return;
 
@@ -367,6 +398,54 @@ function JobDetailsContent() {
         }
     }, [companyId, apiUrl, jobId]);
 
+    const fetchCompletionReport = useCallback(async () => {
+        if (!companyId || !apiUrl || !jobId) return;
+
+        setReportLoading(true);
+        setReportError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/jobs/${jobId}/completion-report/`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    }
+                },
+            );
+
+            const responseText = await response.text();
+            const data = responseText ? JSON.parse(responseText) : null;
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(
+                        data,
+                        "Unable to load completion report."
+                    )
+                );
+            }
+
+            setCompletionReport(data || null);
+        } catch (err) {
+            setReportError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to load completion report."
+            );
+        } finally {
+            setReportLoading(false);
+        }
+    }, [companyId, apiUrl, jobId]);
+
     async function addJobNote() {
         if (!companyId || !apiUrl || !jobId || !newNote.trim()) {
             return;
@@ -420,6 +499,70 @@ function JobDetailsContent() {
             );
         } finally {
             setNoteSaving(false);
+        }
+    }
+
+    async function submitCompletionReport() {
+        if (!companyId || !apiUrl || !jobId) return;
+
+        if (!reportForm.work_performed.trim()) {
+            setReportError("Please describe the work performed.");
+            return;
+        }
+
+        setReportSaving(true);
+        setReportError("");
+
+        try {
+            const token = sessionStorage.getItem("accessToken");
+
+            if (!token) {
+                throw new Error(
+                    "Your session has expired. Please log in again."
+                );
+            }
+
+            const response = await fetch(
+                `${apiUrl}/api/companies/${companyId}/jobs/${jobId}/completion-report/`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        work_performed: reportForm.work_performed.trim(),
+                        issues_found: reportForm.issues_found.trim(),
+                        parts_used: reportForm.parts_used.trim(),
+                        parts_required: reportForm.parts_required.trim(),
+                        recommendations: reportForm.recommendations.trim(),
+                        additional_notes: reportForm.additional_notes.trim(),
+                    }),
+                },
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    getErrorMessage(
+                        data,
+                        "Unable to submit completion report."
+                    )
+                );
+            }
+
+            setCompletionReport(data);
+
+            await fetchActivities();
+        } catch (err) {
+            setReportError(
+                err instanceof Error
+                    ? err.message
+                    : "Unable to submit completion report."
+            );
+        } finally {
+            setReportLoading(false);
         }
     }
 
@@ -637,6 +780,18 @@ function JobDetailsContent() {
 
         fetchNotes();
     }, [userLoading, companyId, apiUrl, jobId, fetchNotes]);
+
+    useEffect(() => {
+        if (userLoading || !companyId || !apiUrl || !jobId) return;
+
+        fetchCompletionReport();
+    }, [
+        userLoading,
+        companyId,
+        apiUrl,
+        jobId,
+        fetchCompletionReport,
+    ]);
 
     useEffect(() => {
         if (
@@ -1472,6 +1627,175 @@ function JobDetailsContent() {
                                         );
                                     })}
                                 </div>
+                            )}
+                        </section>
+
+                        {/* Work Completion Report */}
+                        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                            <div className="mb-5">
+                                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                                    Work Completion Report
+                                </h2>
+                                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                    Record the work performed and findings for this service job.
+                                </p>
+                            </div>
+
+                            {reportLoading ? (
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    Loading completion report...
+                                </p>
+                            ) : reportError && !completionReport ? (
+                                <div>
+                                    <p className="text-sm text-red-600 dark:text-red-400">
+                                        {reportError}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={fetchCompletionReport}
+                                        className="mt-3 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            ) : completionReport ? (
+                                <div className="space-y-5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                                            Submitted by{" "}
+                                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                                                {completionReport.submitted_by_name}
+                                            </span>
+                                        </p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                                            {formatDate(completionReport.created_at)}
+                                        </p>
+                                    </div>
+
+                                    {[
+                                        {
+                                            label: "Work Performed",
+                                            value: completionReport.work_performed,
+                                            required: true,
+                                        },
+                                        {
+                                            label: "Issues Found",
+                                            value: completionReport.issues_found,
+                                        },
+                                        {
+                                            label: "Parts Used",
+                                            value: completionReport.parts_used,
+                                        },
+                                        {
+                                            label: "Parts Required",
+                                            value: completionReport.parts_required,
+                                        },
+                                        {
+                                            label: "Recommendations",
+                                            value: completionReport.recommendations,
+                                        },
+                                        {
+                                            label: "Additional Notes",
+                                            value: completionReport.additional_notes,
+                                        },
+                                    ].map((item) => (
+                                        <div key={item.label}>
+                                            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                                {item.label}
+                                            </h3>
+                                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">
+                                                {item.value.trim() || "None reported"}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : isAssignedTechnician && job?.status === "IN_PROGRESS" ? (
+                                <div className="space-y-4">
+                                    {[
+                                        {
+                                            name: "work_performed",
+                                            label: "Work Performed",
+                                            placeholder: "Describe the work completed...",
+                                            required: true,
+                                        },
+                                        {
+                                            name: "issues_found",
+                                            label: "Issues Found",
+                                            placeholder: "Describe any issues discovered...",
+                                        },
+                                        {
+                                            name: "parts_used",
+                                            label: "Parts Used",
+                                            placeholder: "List the parts used during the repair...",
+                                        },
+                                        {
+                                            name: "parts_required",
+                                            label: "Parts Required",
+                                            placeholder: "List any additional parts required...",
+                                        },
+                                        {
+                                            name: "recommendations",
+                                            label: "Recommendations",
+                                            placeholder: "Add recommendations for the customer...",
+                                        },
+                                        {
+                                            name: "additional_notes",
+                                            label: "Additional Notes",
+                                            placeholder: "Any other relevant information...",
+                                        },
+                                    ].map((field) => (
+                                        <div key={field.name}>
+                                            <label
+                                                htmlFor={`report-${field.name}`}
+                                                className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            >
+                                                {field.label}
+                                                {"required" in field && field.required && (
+                                                    <span className="ml-1 text-red-500">*</span>
+                                                )}
+                                            </label>
+                                            <textarea
+                                                id={`report-${field.name}`}
+                                                rows={field.name === "work_performed" ? 4 : 3}
+                                                value={
+                                                    reportForm[
+                                                    field.name as keyof typeof reportForm
+                                                    ]
+                                                }
+                                                onChange={(event) =>
+                                                    setReportForm((previous) => ({
+                                                        ...previous,
+                                                        [field.name]: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder={field.placeholder}
+                                                maxLength={5000}
+                                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                                            />
+                                        </div>
+                                    ))}
+
+                                    {reportError && (
+                                        <p className="text-sm text-red-600 dark:text-red-400">
+                                            {reportError}
+                                        </p>
+                                    )}
+
+                                    <button
+                                        type="button"
+                                        onClick={submitCompletionReport}
+                                        disabled={
+                                            reportSaving || !reportForm.work_performed.trim()
+                                        }
+                                        className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {reportSaving ? "Submitting..." : "Submit Completion Report"}
+                                    </button>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    No completion report has been submitted yet.
+                                </p>
                             )}
                         </section>
 

@@ -16,6 +16,7 @@ from main.jobs.views import (
     CompanyPartStockAdjustmentView,
     CompanyRevenueTrendView,
     CompanyServiceJobActivityListView,
+    CompanyServiceJobCompletionReportView,
     CompanyServiceJobDetailView,
     CompanyServiceJobListCreateView,
     CompanyServiceJobPartListCreateView,
@@ -120,5 +121,10 @@ urlpatterns = [
         "companies/<uuid:company_id>/technician-workload/",
         CompanyTechnicianWorkloadView.as_view(),
         name="company-technician-workload",
+    ),
+    path(
+        "companies/<uuid:company_id>/jobs/<uuid:job_id>/completion-report/",
+        CompanyServiceJobCompletionReportView.as_view(),
+        name="company-service-job-completion-report",
     ),
 ]
