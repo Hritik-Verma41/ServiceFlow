@@ -93,7 +93,10 @@ class CompanyCustomerListCreateView(generics.ListCreateAPIView):
         )
 
     def get_permissions(self):
-        if self.request.method == "POST":
+        if (
+            self.request.method == "POST"
+            or self.request.query_params.get("include_inactive") == "true"
+        ):
             permission_classes = [
                 IsAuthenticated,
                 IsCompanyAdminOrManager,
@@ -106,10 +109,12 @@ class CompanyCustomerListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         company = self.get_company()
 
-        return Customer.objects.filter(
-            company=company,
-            is_active=True,
-        ).order_by("-created_at")
+        queryset = Customer.objects.filter(company=company)
+
+        if self.request.query_params.get("include_inactive") != "true":
+            queryset = queryset.filter(is_active=True)
+
+        return queryset.order_by("-created_at")
 
     def perform_create(self, serializer):
         company = self.get_company()
@@ -128,10 +133,25 @@ class CompanyCustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
 
     def get_queryset(self):
-        return Customer.objects.filter(
+        queryset = Customer.objects.filter(
             company=self.get_company(),
-            is_active=True,
         )
+
+        if self.request.method == "GET":
+            can_view_inactive = CompanyMembership.objects.filter(
+                user=self.request.user,
+                company=self.get_company(),
+                status=CompanyMembership.Status.ACTIVE,
+                role__in=[
+                    CompanyMembership.Role.COMPANY_ADMIN,
+                    CompanyMembership.Role.MANAGER,
+                ],
+            ).exists()
+
+            if can_view_inactive:
+                return queryset
+
+        return queryset.filter(is_active=True)
 
     def get_permissions(self):
         if self.request.method in ["PUT", "PATCH", "DELETE"]:
@@ -148,6 +168,36 @@ class CompanyCustomerDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.is_active = False
         instance.save(update_fields=["is_active", "updated_at"])
 
+class CompanyCustomerReactivateView(generics.GenericAPIView):
+    serializer_class = CustomerSerializer
+    permission_classes = [
+        IsAuthenticated,
+        IsCompanyAdminOrManager,
+    ]
+
+    def get_company(self):
+        return get_object_or_404(
+            Company,
+            id=self.kwargs["company_id"],
+            is_active=True,
+        )
+
+    def post(self, request, *args, **kwargs):
+        customer = get_object_or_404(
+            Customer,
+            id=self.kwargs["customer_id"],
+            company=self.get_company(),
+            is_active=False,
+        )
+
+        customer.is_active = True
+        customer.save(update_fields=["is_active", "updated_at"])
+
+        return Response(
+            self.get_serializer(customer).data,
+            status=status.HTTP_200_OK,
+        )
+
 class CompanyCustomerAddressListCreateView(generics.ListCreateAPIView):
     serializer_class = CustomerAddressSerializer
     permission_classes = [IsAuthenticated, IsActiveCompanyMember]
@@ -160,10 +210,27 @@ class CompanyCustomerAddressListCreateView(generics.ListCreateAPIView):
         )
 
     def get_customer(self):
-        return get_object_or_404(
-            Customer,
+        queryset = Customer.objects.filter(
             id=self.kwargs["customer_id"],
             company=self.get_company(),
+        )
+
+        if self.request.method == "GET":
+            can_view_inactive = CompanyMembership.objects.filter(
+                user=self.request.user,
+                company=self.get_company(),
+                status=CompanyMembership.Status.ACTIVE,
+                role__in=[
+                    CompanyMembership.Role.COMPANY_ADMIN,
+                    CompanyMembership.Role.MANAGER,
+                ],
+            ).exists()
+
+            if can_view_inactive:
+                return get_object_or_404(queryset)
+
+        return get_object_or_404(
+            queryset,
             is_active=True,
         )
 
@@ -183,8 +250,24 @@ class CompanyCustomerAddressListCreateView(generics.ListCreateAPIView):
             customer=self.get_customer(),
         ).order_by("-is_primary", "-created_at")
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        serializer.save(customer=self.get_customer())
+        customer = self.get_customer()
+
+        # Lock the customer so primary-address changes are serialized.
+        Customer.objects.select_for_update().get(
+            id=customer.id
+        )
+
+        address = serializer.save(customer=customer)
+
+        if address.is_primary:
+            CustomerAddress.objects.filter(
+                customer=customer,
+                is_primary=True,
+            ).exclude(
+                id=address.id
+            ).update(is_primary=False)
 
 class CompanyCustomerAddressDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CustomerAddressSerializer
@@ -221,3 +304,22 @@ class CompanyCustomerAddressDetailView(generics.RetrieveUpdateDestroyAPIView):
         return CustomerAddress.objects.filter(
             customer=self.get_customer(),
         )
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        customer = self.get_customer()
+
+        # Lock the customer before changing primary-address state.
+        Customer.objects.select_for_update().get(
+            id=customer.id
+        )
+
+        if serializer.validated_data.get("is_primary") is True:
+            CustomerAddress.objects.filter(
+                customer=customer,
+                is_primary=True,
+            ).exclude(
+                id=serializer.instance.id
+            ).update(is_primary=False)
+
+        serializer.save()

@@ -227,6 +227,70 @@ class CompanyCustomerAPITests(TestCase):
 
         self.assertNotIn(str(self.customer_a.id), customer_ids)
 
+    def test_admin_can_list_active_and_inactive_customers(self):
+        self.customer_a.is_active = False
+        self.customer_a.save(update_fields=["is_active"])
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(
+            self.url(),
+            {"include_inactive": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        customer_ids = {
+            item["id"] for item in response.data["results"]
+        } if isinstance(response.data, dict) and "results" in response.data else {
+            item["id"] for item in response.data
+        }
+
+        self.assertIn(str(self.customer_a.id), customer_ids)
+
+    def test_technician_cannot_list_inactive_customers(self):
+        self.customer_a.is_active = False
+        self.customer_a.save(update_fields=["is_active"])
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.get(
+            self.url(),
+            {"include_inactive": "true"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_company_admin_can_reactivate_customer(self):
+        self.customer_a.is_active = False
+        self.customer_a.save(update_fields=["is_active"])
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            f"{self.customer_detail_url(self.customer_a.id)}reactivate/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.customer_a.refresh_from_db()
+        self.assertTrue(self.customer_a.is_active)
+
+    def test_technician_cannot_reactivate_customer(self):
+        self.customer_a.is_active = False
+        self.customer_a.save(update_fields=["is_active"])
+
+        self.client.force_authenticate(user=self.technician)
+
+        response = self.client.post(
+            f"{self.customer_detail_url(self.customer_a.id)}reactivate/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+        self.customer_a.refresh_from_db()
+        self.assertFalse(self.customer_a.is_active)
+
     def customer_address_list_url(self, customer_id=None, company_id=None):
         company_id = company_id or self.company_a.id
         customer_id = customer_id or self.customer_a.id
@@ -297,6 +361,60 @@ class CompanyCustomerAPITests(TestCase):
             id=response.data["id"]
         )
         self.assertEqual(address.customer, self.customer_a)
+
+    def test_creating_primary_address_demotes_previous_primary(self):
+        existing_address = self.create_test_address()
+        existing_address.is_primary = True
+        existing_address.save(update_fields=["is_primary"])
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.post(
+            self.customer_address_list_url(),
+            {
+                "label": "Home",
+                "address_line_1": "456 New Street",
+                "city": "Pune",
+                "state": "Maharashtra",
+                "postal_code": "411002",
+                "country": "India",
+                "is_primary": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        existing_address.refresh_from_db()
+        new_address = CustomerAddress.objects.get(
+            id=response.data["id"]
+        )
+
+        self.assertFalse(existing_address.is_primary)
+        self.assertTrue(new_address.is_primary)
+
+    def test_updating_address_to_primary_demotes_previous_primary(self):
+        existing_primary = self.create_test_address()
+        existing_primary.is_primary = True
+        existing_primary.save(update_fields=["is_primary"])
+
+        address_to_promote = self.create_test_address()
+
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.customer_address_detail_url(address_to_promote.id),
+            {"is_primary": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        existing_primary.refresh_from_db()
+        address_to_promote.refresh_from_db()
+
+        self.assertFalse(existing_primary.is_primary)
+        self.assertTrue(address_to_promote.is_primary)
 
     def test_request_cannot_override_customer_from_url(self):
         self.client.force_authenticate(user=self.admin)

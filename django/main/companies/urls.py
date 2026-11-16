@@ -7,6 +7,7 @@ from .views import (
     CompanyCustomerAddressListCreateView,
     CompanyCustomerDetailView,
     CompanyCustomerListCreateView,
+    CompanyCustomerReactivateView,
 )
 
 
@@ -30,6 +31,11 @@ urlpatterns = [
         "companies/<uuid:company_id>/customers/<uuid:customer_id>/",
         CompanyCustomerDetailView.as_view(),
         name="company-customer-detail"
+    ),
+    path(
+        "companies/<uuid:company_id>/customers/<uuid:customer_id>/reactivate/",
+        CompanyCustomerReactivateView.as_view(),
+        name="company-customer-reactivate",
     ),
     path(
         "companies/<uuid:company_id>/customers/<uuid:customer_id>/addresses/",
