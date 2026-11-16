@@ -9,6 +9,7 @@ import 'package:serviceflow/features/technician/presentation/completed_jobs_scre
 import 'package:serviceflow/features/technician/presentation/service_job_detail_screen.dart';
 import 'package:serviceflow/features/technician/presentation/technician_activity_screen.dart';
 import 'package:serviceflow/features/technician/presentation/technician_home_screen.dart';
+import 'package:serviceflow/features/technician/presentation/technician_profile_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
@@ -76,6 +77,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return CompletedJobsScreen(
             companyId: state.pathParameters['companyId']!,
           );
+        },
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) {
+          final user = ref.read(authControllerProvider).value;
+
+          if (user == null) {
+            return const _AuthLoadingScreen();
+          }
+
+          return TechnicianProfileScreen(user: user);
         },
       ),
     ],

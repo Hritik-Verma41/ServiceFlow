@@ -47,6 +47,13 @@ class TechnicianHomeScreen extends ConsumerWidget {
               context.push('/activity/${membership.companyId}');
             },
           ),
+          IconButton(
+            tooltip: 'My Profile',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () {
+              context.push('/profile');
+            },
+          ),
           const ThemeModeSelector(),
           const SizedBox(width: 8),
         ],
