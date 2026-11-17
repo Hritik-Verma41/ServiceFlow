@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:serviceflow/features/auth/domain/app_user.dart';
 import 'package:serviceflow/features/technician/data/service_job_repository.dart';
+import 'package:serviceflow/features/technician/domain/job_activity.dart';
 import 'package:serviceflow/features/technician/domain/service_job.dart';
 import 'package:serviceflow/shared/widgets/theme_mode_selector.dart';
 
@@ -73,9 +74,16 @@ class TechnicianHomeScreen extends ConsumerWidget {
           user: user,
           firstName: firstName,
           companyName: membership.companyName,
+          companyId: membership.companyId,
           jobs: jobs,
-          onRefresh: () =>
+          onRefresh: () async {
+            await Future.wait<Object?>([
               ref.refresh(technicianJobsProvider(membership.companyId).future),
+              ref.refresh(
+                technicianActivitiesProvider(membership.companyId).future,
+              ),
+            ]);
+          },
         ),
       ),
     );
@@ -85,6 +93,7 @@ class TechnicianHomeScreen extends ConsumerWidget {
 class _DashboardBody extends StatelessWidget {
   final AppUser user;
   final String firstName;
+  final String companyId;
   final String companyName;
   final List<ServiceJob> jobs;
   final Future<void> Function() onRefresh;
@@ -92,6 +101,7 @@ class _DashboardBody extends StatelessWidget {
   const _DashboardBody({
     required this.user,
     required this.firstName,
+    required this.companyId,
     required this.companyName,
     required this.jobs,
     required this.onRefresh,
@@ -203,6 +213,7 @@ class _DashboardBody extends StatelessWidget {
           const SizedBox(height: 28),
 
           _JobSection(
+            companyId: companyId,
             title: 'My Active Jobs',
             subtitle: 'Your assigned work that is not yet completed',
             count: activeJobs.length,
@@ -215,6 +226,7 @@ class _DashboardBody extends StatelessWidget {
           const SizedBox(height: 24),
 
           _JobSection(
+            companyId: companyId,
             title: "Today's Jobs",
             subtitle: 'Jobs scheduled for today',
             count: todayJobs.length,
@@ -227,6 +239,7 @@ class _DashboardBody extends StatelessWidget {
           const SizedBox(height: 24),
 
           _JobSection(
+            companyId: companyId,
             title: 'Upcoming Jobs',
             subtitle: 'Your future scheduled work',
             count: upcomingJobs.length,
@@ -236,6 +249,10 @@ class _DashboardBody extends StatelessWidget {
             icon: Icons.upcoming_outlined,
             showScheduleDate: true,
           ),
+
+          const SizedBox(height: 24),
+
+          _RecentActivitySection(companyId: companyId),
 
           const SizedBox(height: 24),
 
@@ -408,6 +425,7 @@ class _StatCard extends StatelessWidget {
 }
 
 class _JobSection extends StatelessWidget {
+  final String companyId;
   final String title;
   final String subtitle;
   final int count;
@@ -418,6 +436,7 @@ class _JobSection extends StatelessWidget {
   final bool showScheduleDate;
 
   const _JobSection({
+    required this.companyId,
     required this.title,
     required this.subtitle,
     required this.count,
@@ -463,7 +482,11 @@ class _JobSection extends StatelessWidget {
           ...jobs.map(
             (job) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: _JobCard(job: job, showScheduleDate: showScheduleDate),
+              child: _JobCard(
+                job: job,
+                companyId: companyId,
+                showScheduleDate: showScheduleDate,
+              ),
             ),
           ),
       ],
@@ -472,10 +495,15 @@ class _JobSection extends StatelessWidget {
 }
 
 class _JobCard extends StatelessWidget {
+  final String companyId;
   final ServiceJob job;
   final bool showScheduleDate;
 
-  const _JobCard({required this.job, this.showScheduleDate = false});
+  const _JobCard({
+    required this.companyId,
+    required this.job,
+    this.showScheduleDate = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -486,12 +514,7 @@ class _JobCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          // Job details navigation is handled by the existing job route.
-          final membership = context
-              .findAncestorWidgetOfExactType<TechnicianHomeScreen>();
-          if (membership != null) {
-            // The card is opened through the company-specific route below.
-          }
+          context.push('/jobs/$companyId/${job.id}');
         },
         child: Padding(
           padding: const EdgeInsets.all(15),
@@ -742,5 +765,215 @@ class _ErrorView extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _RecentActivitySection extends ConsumerWidget {
+  final String companyId;
+
+  const _RecentActivitySection({required this.companyId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activitiesAsync = ref.watch(technicianActivitiesProvider(companyId));
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeading(
+          title: 'Recent Activity',
+          subtitle: 'The latest updates from your service jobs',
+        ),
+        const SizedBox(height: 12),
+        activitiesAsync.when(
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+          error: (error, stackTrace) => Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                const Text('Unable to load recent activity.'),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    ref.invalidate(technicianActivitiesProvider(companyId));
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try Again'),
+                ),
+              ],
+            ),
+          ),
+          data: (activities) {
+            final sortedActivities = [...activities]
+              ..sort((a, b) {
+                if (a.createdAt == null) return 1;
+                if (b.createdAt == null) return -1;
+                return b.createdAt!.compareTo(a.createdAt!);
+              });
+
+            final recentActivities = sortedActivities.take(5).toList();
+
+            if (recentActivities.isEmpty) {
+              return const _EmptySection(
+                icon: Icons.history,
+                title: 'No recent activity',
+                message: 'Updates from your service jobs will appear here.',
+              );
+            }
+
+            return Column(
+              children: [
+                ...recentActivities.map(
+                  (activity) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _RecentActivityCard(
+                      activity: activity,
+                      companyId: companyId,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    context.push('/activity/$companyId');
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('View All Activity'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 46),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _RecentActivityCard extends StatelessWidget {
+  final JobActivity activity;
+  final String companyId;
+
+  const _RecentActivityCard({required this.activity, required this.companyId});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final canOpenJob = activity.jobId != null;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: canOpenJob
+            ? () {
+                context.push('/jobs/$companyId/${activity.jobId}');
+              }
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: theme.colorScheme.primaryContainer,
+                child: Icon(
+                  _activityIcon(activity.eventType),
+                  color: theme.colorScheme.onPrimaryContainer,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _activityTitle(activity.eventType),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      activity.description,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      '${activity.actorName} • ${_activityDate(context, activity.createdAt)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (canOpenJob) ...[
+                      const SizedBox(height: 7),
+                      Text(
+                        'View job details →',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _activityIcon(String eventType) {
+    return switch (eventType) {
+      'JOB_CREATED' => Icons.add_task,
+      'JOB_STATUS_CHANGED' => Icons.sync,
+      'TECHNICIAN_ASSIGNED' => Icons.person_add_alt_1,
+      'COMPLETION_REPORT_SUBMITTED' => Icons.assignment_turned_in,
+      'NOTE_ADDED' => Icons.note_add_outlined,
+      'INVOICE_CREATED' => Icons.receipt_long,
+      'PAYMENT_RECEIVED' => Icons.payments_outlined,
+      _ => Icons.history,
+    };
+  }
+
+  String _activityTitle(String eventType) {
+    return switch (eventType) {
+      'JOB_CREATED' => 'Job Created',
+      'JOB_STATUS_CHANGED' => 'Status Updated',
+      'TECHNICIAN_ASSIGNED' => 'Technician Assigned',
+      'COMPLETION_REPORT_SUBMITTED' => 'Completion Report',
+      'NOTE_ADDED' => 'Note Added',
+      'INVOICE_CREATED' => 'Invoice Created',
+      'PAYMENT_RECEIVED' => 'Payment Received',
+      _ => eventType.replaceAll('_', ' '),
+    };
+  }
+
+  String _activityDate(BuildContext context, DateTime? date) {
+    if (date == null) return 'Date unavailable';
+
+    final localDate = date.toLocal();
+    final formattedDate = MaterialLocalizations.of(context)
+        .formatMediumDate(localDate);
+    final formattedTime = MaterialLocalizations.of(context)
+        .formatTimeOfDay(TimeOfDay.fromDateTime(localDate));
+
+    return '$formattedDate at $formattedTime';
   }
 }
